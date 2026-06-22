@@ -21,5 +21,4 @@
 - 建立脚本链：fetch / parse_local_html / download_images / build_factor_lib / build_index / classify_factors。
 
 ## 待办
-- **郑兆磊缺 1 篇**：用户原列 23 篇，实际贴来的 URL 只有 22 条（差 1 条）。补全该 URL 后 `fetch.py --source zhengzhaolei` 续抓 → zhengzhaolei 22→23、总库 179→180。
 - **回测/实现**：因子的工程实现 + 回测在 47 的 `factor_library` 项目做；本地只产因子笔记。

@@ -45,7 +45,6 @@
 - 大批量抓取若不想反复换 IP，优先 SingleFile 兜底（存 HTML → `parse_local_html.py`）。
 
 ## 待办
-- 郑兆磊缺 1 篇（原列 23、实际贴来 22），补 URL 后续抓 → 180 篇。
 - 因子的回测 / 工程实现：在 47 的 `factor_library` 做。
 
 ## 备份 / 版本
