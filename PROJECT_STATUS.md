@@ -48,6 +48,6 @@
 - 郑兆磊缺 1 篇（原列 23、实际贴来 22），补 URL 后续抓 → 180 篇。
 - 因子的回测 / 工程实现：在 47 的 `factor_library` 做。
 
-## 备份
+## 备份 / 版本
 - 重构前整库备份：`C:\Users\cnc\quant_factor_notes_backup_20260622\`（确认无误后可删）。
-- 非 git 仓库（本地未 init）。
+- 已纳入 git（本地仓库，分支 `main`，暂无远程）；`.gitignore` 排除图片/HTML/备份/zip/日志/大体积文件，版本化脚本 + 文档 + `.md` 文章 + `factor_lib/*.py` + `urls.txt` + 汇总产物。
