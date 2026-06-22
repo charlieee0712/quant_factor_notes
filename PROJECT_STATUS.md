@@ -49,4 +49,4 @@
 
 ## 备份 / 版本
 - 重构前整库备份：`C:\Users\cnc\quant_factor_notes_backup_20260622\`（确认无误后可删）。
-- 已纳入 git（本地仓库，分支 `main`，暂无远程）；`.gitignore` 排除图片/HTML/备份/zip/日志/大体积文件，版本化脚本 + 文档 + `.md` 文章 + `factor_lib/*.py` + `urls.txt` + 汇总产物。
+- 已纳入 git，分支 `main`，远程 `origin` = `github.com/charlieee0712/quant_factor_notes`（**Private**）；`.gitignore` 排除图片/HTML/备份/zip/日志/大体积文件，版本化脚本 + 文档 + `.md` 文章 + `factor_lib/*.py` + `urls.txt` + 汇总产物。
