@@ -27,14 +27,22 @@ quant_factor_notes/
 ├── factor_lib.zip              # factor_lib/ 的打包快照
 ├── requirements.txt
 ├── sources/                    # 按来源分目录（爬新首席时新增 sources/<name>/）
-│   └── general/                # 量化拯救散户（现有 109 篇）
-│       ├── urls.txt            # 该来源待抓取链接列表
-│       ├── failed.txt          # 抓取失败记录（自动追加）
-│       ├── image_download.log  # 图片下载历史日志
-│       ├── articles/           # 109 篇 markdown（图片路径已本地化）
-│       │   └── images/         # 109 个子目录，每篇一目录，NNN.png/.jpg 编号
-│       ├── articles_backup/    # 109 篇原始 markdown（图片 URL 未本地化版，回滚锚点）
-│       └── html/               # 55 个 SingleFile 保存的原始 HTML（绕过反爬用）
+│   ├── general/                # 量化拯救散户 109 篇（早期源，含 SingleFile HTML + 日志）
+│   │   ├── urls.txt            # 该来源待抓取链接列表
+│   │   ├── failed.txt          # 抓取失败记录（自动追加）
+│   │   ├── image_download.log  # 图片下载历史日志
+│   │   ├── articles/           # markdown（图片路径已本地化）
+│   │   │   └── images/         # 每篇一子目录，NNN.png/.jpg 编号
+│   │   ├── articles_backup/    # 图片 URL 未本地化版（回滚锚点）
+│   │   └── html/               # 55 个 SingleFile 原始 HTML（绕过反爬用）
+│   ├── caochunxiao/            # 曹春晓 10 篇（以下 5 首席为在线抓取，无 html/、无日志）
+│   │   ├── urls.txt
+│   │   ├── articles/           # markdown + images/ 子目录
+│   │   └── articles_backup/
+│   ├── qinchuantao/            # 覃川桃 8 篇   ┐
+│   ├── weijianrong/            # 魏建榕 14 篇  ├ 结构同 caochunxiao/
+│   ├── chenshengrui/           # 陈升锐 16 篇  │（urls.txt + articles/(+images/) + articles_backup/）
+│   └── zhengzhaolei/           # 郑兆磊 22 篇  ┘
 └── scripts/                    # 共享脚本（用 --source 选择来源）
     ├── fetch.py                # 在线抓取
     ├── parse_local_html.py     # 解析本地 HTML
@@ -47,7 +55,7 @@ quant_factor_notes/
 
 ## 多来源设计要点
 
-- **来源隔离**：每个来源的抓取产物各自落在 `sources/<source>/` 下（articles / html / urls.txt / 备份 / 日志），互不干扰。
+- **来源隔离**：每个来源的抓取产物各自落在 `sources/<source>/` 下（`urls.txt` + `articles/` + `articles_backup/`，以及 SingleFile 源才有的 `html/` 与日志），互不干扰。
 - **因子统一**：`factor_lib/` 在根目录，所有来源的因子混在一起、统一编号，**不**按来源分子目录。
 - **来源可追溯**：每个 `factor_lib/*.py` 头部写 `# 来源标识: <source>`；`factor_classification.csv` 有 `source` 列；`factor_index.md` 有「来源」列。需要按来源筛因子时用这三者之一。
 
@@ -95,7 +103,7 @@ C:\Users\cnc\anaconda3\envs\wechat_fetch\python.exe scripts\<name>.py --source <
 ## 数据备份
 
 - `sources/<source>/articles_backup/` — 原始 markdown（图片 URL 未本地化版本）。图片本地化前的回滚锚点。
-- `sources/<source>/html/` — SingleFile 保存的原始 HTML。正文解析的回滚锚点。
+- `sources/<source>/html/` — SingleFile 保存的原始 HTML（仅 SingleFile 抓取的来源有，如 `general`；在线抓取的首席源无）。正文解析的回滚锚点。
 
 ## 已知特性（非缺陷）
 

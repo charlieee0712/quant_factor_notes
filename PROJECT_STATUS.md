@@ -22,7 +22,7 @@
 | **合计** | | **179** |
 
 ## 目录结构（要点）
-- `sources/<来源>/` — 按来源隔离：`articles/`(+`images/`) + `html/` + `articles_backup/` + `urls.txt`/日志。
+- `sources/<来源>/` — 按来源隔离：`urls.txt` + `articles/`(+`images/`) + `articles_backup/`；`general` 另含早期 SingleFile 的 `html/` 与日志，在线抓取的首席源无。
 - `factor_lib/` — **跨来源统一**，不分来源子目录、统一编号；每个 `.py` 头含 `# 来源标识`。
 - `factor_index.md` / `factor_classification.csv` — 跨来源汇总（CSV 含 `source` 列）。
 - `scripts/` — 共享脚本，全部支持 `--source`（默认 general）。
