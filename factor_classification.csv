@@ -1,0 +1,3043 @@
+﻿date,original_title,likely_factor_type,has_code,data_source,fields_used,external_deps,code_lines,author_ic_claim,author_layer_claim,keywords_from_index,core_formula,source_file,source
+2025-03-09,用欧式距离计算的惊恐度因子，从1分钟k线到60分钟k线的大合集,volatility,yes,minute_unspecified,close,duckdb|joblib|tqdm,73,,,研报 / 改进 / 欧式距离 / 波动率 / 收益率,"def process_single_day(self, idx):
+    """"""处理单日数据""""""
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+
+    if idx == 0:
+        last_df = pd.DataFrame()
+    else:
+        last_df = self.last_close.iloc[[idx-1]]
+
+    # 合并最后收盘价
+    combined_df = pd.concat([
+        last_df,
+        data.to_dataframe('close')
+    ])
+    combined_df.index = combined_df.index.astype(str)
+    combined_df.sort_index(inplace=True)
+    # 计算收益率（避免除零错误）
+    returns = combined_df.pct_change().iloc[1:]
+
+    # 内层并行：计算所有股票的距离指标
+    n_stocks = len(data.codes)
+    fear_values = Parallel(n_jobs=-1, prefer='threads')(
+        delayed(calculate_single_column)(returns, j)
+        for j in range(n_stocks)
+    )
+
+    return pd.Series(fear_values, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))",2025-03-09_用欧式距离计算的惊恐度因子，从1分钟k线到60分钟k线的大合集.py,general
+2025-03-10,理想振幅因子，看起来还行，至少比欧氏距离计算的惊恐度强,other,yes,minute_unspecified,close|high|low,,12,,,研报 / 理想振幅 / 振幅 / 1分钟 / 5分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['high', 'low', 'close'])
+    data.data[:, 0, :] = data.data[:, 0, :] / data.data[:, 1, :] - 1
+    
+    amp_df = data.to_dataframe('high')
+    close_df = data.to_dataframe('close')
+    thd = close_df.quantile([0.25, 0.75])
+    amp_series = amp_df.where(close_df >= thd.iloc[1]).mean(axis=0) - amp_df.where(close_df <= thd.iloc[0]).mean(axis=0)
+    amp_series.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return amp_series",2025-03-10_理想振幅因子，看起来还行，至少比欧氏距离计算的惊恐度强.py,general
+2025-03-21,持续异常交易量，这个研报因子还行,event_driven,yes,minute_unspecified,volume,tqdm,24,,总结：这个因子用1分钟的数据计算的IC绝对值还是不错的，频率越低效果越差，到60分钟的时候就完全不能用了。,研报 / 交易量 / 峰度 / 异常 / 持续异常,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    if idx < 20:
+        return pd.Series(name = pd.to_datetime(date_str) + timedelta(hours=15))
+
+    data = BaseDataLoader.load_data(os.path.join(self.file_pth, file_name), fields=['volume'])
+    mu = self.last_mean.iloc[idx-20]
+    vol = data.to_dataframe('volume')
+    vol = (vol.div(mu.reindex(data.codes, axis=1), axis=1)).rank(axis=1, pct=True)
+    res = vol.mean(axis=0) / vol.std(axis=0) + vol.kurt(axis=0)
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-03-21_持续异常交易量，这个研报因子还行.py,general
+2025-03-25,跳价期波动，原理很复杂，但计算并不难，2023年IC绝对值超过0.1，2021年后半段的分层回测也不错,volatility,yes,5min_inferred,close,sklearn.GaussianMixture,21,,总结：这个因子在1分钟频率的数据上的表现还可以，IC绝对值稳定，从2020年之后都超过了0.08。,研报 / 复杂 / 收益率 / 高斯混合 / 跳价期,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+    ret = data.data[1:, 0, :] / data.data[:-1, 0, :] - 1
+    ret = ret[:-1, :]
+    res = []
+    for i in range(len(data.codes)):
+        res.append(self.gmm_fit(ret[:, i]))
+    res = pd.Series(data=res, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))",2025-03-25_跳价期波动，原理很复杂，但计算并不难，2023年IC绝对值超过0.1，2021年后半段的分层回测也不错.py,zhengzhaolei
+2025-03-26,从“午蔽古木”因子衍生而来的残差收益率的波动，IC依旧稳定，因子值最高的组风险很大！,volatility,none,no_code,,,0,,总结：该因子的IC依旧稳定，同时其因子值最大的一组回测结果展现出了稳定的下跌趋势，可以作为风险因子来规避到一些未来表现可能不好的标的。虽然，5分钟的数据在IC分析上展现出了更好的性能，但是其分层回测结果只能说是一言难尽了。,波动率 / 残差 / 收益率 / 相关性 / 1分钟,,2025-03-26_从“午蔽古木”因子衍生而来的残差收益率的波动，IC依旧稳定，因子值最高的组风险很大！.py,general
+2025-03-30,用K-means划分跳价期和震荡期，突然一下就有了能写出几十个因子的“方法论”了！,volume,yes,unclear,,sklearn.KMeans,13,,总结：高斯混合分布相比，该因子的IC绝对值略低，分层回测看起来也没有比之前好。所以，看起来是不如用高斯混合分布的。但是，它给我们提供了一个新的思路。,研报 / 成交量 / 收益率 / K-means / 高斯混合,"def kmeans_fit(data):
+    x = data[1:, :] / data[:-1, :] - 1
+    flag = np.all(~(np.isnan(x) | np.isinf(x)), axis=1)
+    x = x[flag]
+    if len(x) <= 60:
+        return np.nan
+    model = KMeans(n_clusters=2)
+    model.fit(x)
+    labels = model.labels_
+    if np.mean(labels) > 0.5:
+        labels = 1 - labels
+    jump_labels = np.where(labels, 1, np.nan)
+    return np.nanstd(x[0, :] * jump_labels)",2025-03-30_用K-means划分跳价期和震荡期，突然一下就有了能写出几十个因子的“方法论”了！.py,general
+2025-03-31,一个K-means+波动率，居然可以衍生出成百上千个因子！,volatility,none,no_code,,,0,,总结：跳价期的上行波动率这个因子在2018-2024年这7年的时间里，每一年的IC绝对值都超过了0.06。但是，分层回测的表现就没有那么好了。,波动率 / 残差 / 收益率 / K-means,,2025-03-31_一个K-means+波动率，居然可以衍生出成百上千个因子！.py,general
+2025-04-01,分为跳价期和震荡期后，只有成交量和成交额也能有将近100个因子？,volatility,none,no_code,,,0,,震荡期vwap收益率,研报 / 成交量 / 波动率 / 收益率 / 相关性,,2025-04-01_分为跳价期和震荡期后，只有成交量和成交额也能有将近100个因子？.py,general
+2025-04-02,用高斯混合分布将分钟级收益率划分为震荡期、下跌期和上涨期之和，看起来比跳价期和震荡期要好！,other,yes,unclear,,sklearn.GaussianMixture,21,,总结：总体来看，分成震荡期、上涨期和下跌期的效果不如只分成震荡期和跳价期的效果。,研报 / 改进 / 收益率 / 高斯混合 / 跳价期,"def gmm_fit(data):
+    flag = ~np.isnan(data)
+    arr = data[flag]
+    gmm = GaussianMixture(n_components=3, covariance_type='full')
+    gmm.fit(arr.reshape(-1, 1))
+    keys = gmm.weights_
+    mu = gmm.means_.reshape(-1)
+    sigma = np.sqrt(gmm.covariances_).reshape(-1)
+
+    fluctuation_idx = np.argmax(keys)
+    res = [keys[fluctuation_idx], mu[fluctuation_idx], sigma[fluctuation_idx]]
+
+    up_idx = np.argmax(mu)
+    if mu[up_idx] < 0 or mu[up_idx] - mu[fluctuation_idx] <= 1e-4:
+        mu[up_idx] = 0
+    res += [keys[up_idx], mu[up_idx], sigma[up_idx]]
+
+    down_idx = np.argmin(mu)
+    if mu[down_idx] > 0 or mu[fluctuation_idx] - mu[down_idx] <= 1e-4:
+        mu[down_idx] = 0
+    res += [keys[down_idx], mu[down_idx], sigma[down_idx]]
+    return res",2025-04-02_用高斯混合分布将分钟级收益率划分为震荡期、下跌期和上涨期之和，看起来比跳价期和震荡期要好！.py,general
+2025-04-06,日内黄金分割反转，计算很简单，但是效果却不简单！,reversal,none,no_code,,,0,,总结：这个因子的IC还是非常稳定的，只有12个月的IC为正。不过，它在分层回测中表现的单调性并不是太好，因为因子值第二大的那组收益率居然一直排在前面。,研报 / 反转 / 收益率 / 高斯混合 / 黄金分割,,2025-04-06_日内黄金分割反转，计算很简单，但是效果却不简单！.py,general
+2025-04-11,轨迹的非流动性，来自长江证券的首席覃川桃！,other,yes,minute_unspecified,close|open|turnover,,9,,总结：这个因子在各种频率的数据上的表现可以说是没有太大的差异。这也和研报种的结论是一致的。其实，这一点从相关性也能看出来，这些因子的秩相关系数，最低也有0.87。,研报 / 收益率 / 非流动性 / 流动性 / 日频,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'turnover'])
+    ret = np.log(np.prod(np.abs(data.data[:, 0, :] / data.data[:, 1, :] - 1) + 1, axis=0))
+    turnover = data.to_dataframe('turnover').sum(axis=0)
+    res = pd.Series(data=ret/turnover.values, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))
+    return res",2025-04-11_轨迹的非流动性，来自长江证券的首席覃川桃！.py,qinchuantao
+2025-04-12,聪明钱因子，IC虽然不高，但分层回测还不错！,smart_money,yes,unclear,,,16,,总结：本文因子评价展示的因子是过去21个交易日聪明钱因子的均值。虽然，用21天的标准差比用均值的IC绝对值更高，但是用均值的话分层回测的曲线看起来好一些，至少没有那么多相交的情况。此外，该因子笔者的计算方式和研报不同，我们有理由相信，如果按...,研报 / 成交量 / 收益率 / 聪明钱,"def cal_factors(data):
+    data.columns = ['s_t', 'volume', 'turnover']
+    data.sort_values(by='s_t', ascending=False, inplace=True)
+    total_vol = data['volume'].sum()
+    total_money = data['turnover'].sum()
+
+    thd = total_vol * 0.2
+    smart_vol = 0
+    smart_money = 0
+    for i in range(len(data)):
+        smart_vol += data.iloc[i, 1]
+        smart_money += data.iloc[i, 2]
+        if smart_vol > thd:
+            break
+    vwap_smart = smart_money / smart_vol
+    vwap = total_money / total_vol
+    return [vwap_smart, vwap_smart / vwap]",2025-04-12_聪明钱因子，IC虽然不高，但分层回测还不错！.py,weijianrong
+2025-04-13,趋势占比，从1分钟到60分钟K线，哪个效果最好呢？,other,yes,60min_inferred,close,,10,,总结：从2018-2024年的评价结果来看，该因子在5分钟的K线上的表现是最好的！30分钟开始的结果就不能看了，IC有些年份是正相关，有些年份是负相关。合成的因子显然也是不能看了，因为它和60分钟K线的相关性太高了。,研报 / 差分 / 趋势 / 1分钟 / 60分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+    diff = np.diff(data.data[:, 0, :], axis=0)
+
+    res = data.data[-1, 0, :] - data.data[0, 0, :]
+    res = res / np.sum(np.abs(diff), axis=0)
+    res = pd.Series(data=res, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))
+    return res",2025-04-13_趋势占比，从1分钟到60分钟K线，哪个效果最好呢？.py,general
+2025-04-15,根据“待著而救”因子改进“聪明钱”因子，会取得更好的效果吗？,smart_money,yes,unclear,,,19,,总结：按照这个思路，我们可以对聪明钱因子来一系列改进了，就是不知道这些因子当中会不会出现一个IC和分层回测表现都很好的因子了，让我们拭目以待吧！,研报 / 改进 / 成交量 / 聪明钱 / 日频,"def cal_factors(data, turnover):
+    q = data.nlargest(10)
+    q.sort_index(inplace=True)
+    top_idx = np.array(q.index.tolist())
+    while True:
+        diff = np.insert(np.diff(top_idx, 1) > 6, 0, True)
+        if np.all(diff):
+            break
+        top_idx = top_idx[diff]
+    top_vol, follow_vol, top_money, follow_money = 0, 0, 0, 0
+
+    for i in top_idx:
+        top_vol += q.loc[i]
+        top_money += turnover.iloc[i]
+        for j in range(1, 6):
+            if i + j < 225:
+                follow_vol += data.iloc[i + j]
+                follow_money += turnover.iloc[i + j]
+    return [follow_money / follow_vol, top_money / top_vol, turnover.sum() / data.sum()]",2025-04-15_根据“待著而救”因子改进“聪明钱”因子，会取得更好的效果吗？.py,general
+2025-04-17,成交量分布中的alpha因子，来自兴证金工首席的研报,volatility,yes,15min_inferred,volume,,25,,总结：这两个因子都是通过过去21天的均值合成月度因子的，IC还算稳定，分层回测要是只看最后的单调性，也勉强凑合，只是相交的情况太多了。不过，如果从2013年开始回测的话，效果应该会好很多，大家有兴趣的话可以自行尝试一下。,研报 / 成交量 / 偏度 / 峰度 / 1分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume']).to_dataframe('volume')
+
+    vol_change = data.pct_change()
+    vol_skew = vol_change.skew(axis=0)
+    vol_kurt = vol_change.kurt(axis=0)
+
+    cum_vol = data.cumsum(axis=0)
+    cum_vol_mean = cum_vol.mean(axis=0)
+    cum_vol_std = cum_vol.std(axis=0)
+
+    log_vol = np.log(1 + data)
+    log_vol_skew = log_vol.skew(axis=0)
+    log_vol_kurt = log_vol.kurt(axis=0)
+
+    log_vol_sum = log_vol.sum(axis=0)
+    q = log_vol.quantile([0.1, 0.9])
+    log_vol_tail10 = (log_vol * (log_vol < q.iloc[0])).sum(axis=0) / log_vol_sum
+    log_vol_tail90 = (log_vol * (log_vol > q.iloc[1])).sum(axis=0) / log_vol_sum
+
+    res = pd.concat([vol_skew, vol_kurt, cum_vol_std, cum_vol_mean, log_vol_kurt,
+                     log_vol_skew, log_vol_tail90, log_vol_tail10], axis=1)
+    res.columns = ['vol_skew', 'vol_kurt', 'cum_vol_std', 'cum_vol_mean', 'log_vol_kurt',
+                   'log_vol_skew', 'log_vol_tail90', 'log_vol_tail10']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-04-17_成交量分布中的alpha因子，来自兴证金工首席的研报.py,zhengzhaolei
+2025-04-18,价格时滞，虽然效果不是太好，但是提供了一种全新的思路！,other,yes,unclear,,,28,,总结：由于笔者没有市场收益的数据，所以在实现的时候用全市场所有标的收益的中值作为市场收益近似计算的。虽然这个因子的表现一般，但是它给我们提供了一个全新的思路，可以将市场收益换成成交量的变化然后进行同样的操作。同时，还能将其应用到分钟级别的数...,研报 / 收益率 / 价格时滞 / R方 / 日频,"def process_single_day(self, idx):
+    tmp_y = self.data.iloc[idx - 21:idx].dropna(how='all', axis=1)
+    tmp_x = self.mkt_ret.iloc[idx - 21:idx]
+
+    Y_full = tmp_y.dropna(axis=1)
+    idx_full, Y_full = Y_full.columns, Y_full.values
+    X_full = np.c_[np.ones((21, 1)), tmp_x.values]
+    beta_full = np.linalg.pinv(X_full.T @ X_full) @ X_full.T @ Y_full
+    r2 = compute_r_squared(X_full @ beta_full, Y_full)
+    beta_full[2:, :] = 0
+    new_r2 = compute_r_squared(X_full @ beta_full, Y_full)
+    factor_full = pd.Series(data=1 - new_r2 / r2, index=idx_full, name=tmp_x.index[-1])
+
+    factor_lack = {}
+    for c in set(tmp_y.columns) - set(idx_full):
+        lack_tmp_y = tmp_y.loc[:, [c]].copy()
+        lack_tmp_y = lack_tmp_y.dropna()
+        lack_tmp_x = tmp_x.reindex(lack_tmp_y.index)
+        if len(lack_tmp_y) < 10:
+            factor_lack[c] = np.nan
+            continue
+        X_lack = np.c_[np.ones(len(lack_tmp_y)), lack_tmp_x.values]
+        Y_lack = lack_tmp_y.values
+        beta_lack = np.linalg.pinv(X_lack.T @ X_lack) @ X_lack.T @ Y_lack
+        r2 = compute_r_squared(X_lack @ beta_lack, Y_lack)[0]
+        beta_lack[2:, :] = 0
+        new_r2 = compute_r_squared(X_lack @ beta_lack, Y_lack)[0]
+        factor_lack[c] = 1 - new_r2 / r2
+    factor_lack = pd.Series(factor_lack, name=tmp_x.index[-1])
+    return pd.concat([factor_full, factor_lack]).sort_index()",2025-04-18_价格时滞，虽然效果不是太好，但是提供了一种全新的思路！.py,general
+2025-04-19,基于K线最短路径构造的非流动性因子，分层回测的效果有点惊艳！,other,none,no_code,,,0,,总结：这个因子虽然IC绝对值不是很高，2024年的IC绝对值甚至才勉强超过了0.02。但是，在分层回测的时候，确实有那么一点点惊艳。基于1分钟K线计算的因子从2019年后半段开始，因子值最高的一组、中间三组和因子值最低的一组就完全没有相交了...,研报 / 非流动性 / 流动性 / 日内,,2025-04-19_基于K线最短路径构造的非流动性因子，分层回测的效果有点惊艳！.py,general
+2025-04-21,加权收盘价比，来自长江证券首席分析师覃川桃老师的研报，一点微小的改动竟有天翻地覆的变化！,volume,yes,minute_unspecified,close|volume,,9,,总结：这个因子在IC上的表现还算是不错的，每一年的IC绝对值都超过了0.06，除了2018年和2024年（30分钟频率开始，2019年的IC绝对值也低于0.08了），其他年份的IC绝对值甚至超过了0.08。同时，在这个回测区间，该因子只有9...,研报 / 成交量 / 非流动性 / 流动性 / 日频,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume'])
+
+    res = (data.data[:, 0, :] * data.data[:, 1, :] / np.nansum(data.data[:, 1, :], axis=0, keepdims=True))
+    res = np.nansum(res, axis=0) / np.nanmean(data.data[:, 0, :], axis=0)
+    res = pd.Series(data=res, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))
+    return res",2025-04-21_加权收盘价比，来自长江证券首席分析师覃川桃老师的研报，一点微小的改动竟有天翻地覆的变化！.py,qinchuantao
+2025-04-22,耀眼收益率因子，和耀眼波动率来自同一篇研报，会一样出色吗？,volatility,yes,minute_unspecified,close|volume,,19,,总结：这个因子的在IC上的表现依旧出色，但是分层回测的表现却相对一般。因子值最大的一组和因子值最小的一组在2018年到2024年这个区间里的年化收益率都是低于其他三组的。,研报 / 复杂 / 成交量 / 波动率 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close'])
+    ret = data.to_dataframe('close')
+    ret = ret.pct_change().iloc[1:-1]
+    # ret = ret.rolling(5).std()
+
+    vol = data.to_dataframe('volume').iloc[1:-1]
+    vol = vol.diff()
+    thd = vol.mean(axis=0) + vol.std(axis=0)
+    vol = (vol > thd).replace(False, np.nan)
+    dazzling = (vol * ret.reindex(data.codes, axis=1)).mean()
+    dazzling.name = 'dazzling'
+    fill_dazzling = np.abs(dazzling - dazzling.mean())
+    fill_dazzling.name = 'fill_dazzling'
+    res = pd.concat([dazzling, fill_dazzling], axis=1)
+    res.index.name = 'code'
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res.reset_index()",2025-04-22_耀眼收益率因子，和耀眼波动率来自同一篇研报，会一样出色吗？.py,caochunxiao
+2025-04-27,激流勇进因子，从2013年开始等权分层回测结果简直逆天！,volume,yes,minute_unspecified,close|turnover|volume,,18,,总结：这个是通过过去21个交易日的均值合成的月度因子。从IC分析来看，它有3年的IC绝对值超过了0.1。从分层回测结果来看，从2023年，因子值最高的一组就进入到了一种一骑绝尘的状态中。,成交量 / 收益率 / 5分钟 / 日频,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume', 'turnover'])
+    dfs = data.to_dataframes()
+    ret = dfs['close'].pct_change(5) > 0
+    vol = np.where(dfs['volume'].rolling(5).sum().diff() > 0, 1, np.nan)
+
+    condition = ret + vol
+    res = []
+    for idx in [1, 2]:
+        flag = np.where(condition == idx, 1, np.nan)
+        res.append((dfs['turnover'] * flag).sum(axis=0) / dfs['turnover'].sum(axis=0))
+    res = pd.concat(res, axis=1)
+    res.columns = ['down', 'up']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-04-27_激流勇进因子，从2013年开始等权分层回测结果简直逆天！.py,caochunxiao
+2025-04-28,聪明钱因子模型的2.0版本，思路打开，因子变多也变好！,smart_money,none,no_code,,,0,,在这个改动之后，笔者个人更喜欢第二种构造方法得到的聪明钱因子。因为，它的分层回测结果看起来是最好的，因子值最大的一组收益率一直领先其他四组，同时该组的净值曲线和其他四组相交的情况也不是很多。,研报 / 改进 / 成交量 / 聪明钱,,2025-04-28_聪明钱因子模型的2.0版本，思路打开，因子变多也变好！.py,weijianrong
+2025-04-29,成交量协同，又是一个计算了5小时的因子，效果比灾后重建好！,volume,yes,minute_unspecified,close|high|low|open|volume,joblib,35,,总结：这个因子在IC上并没有特别突出的地方，特别是2024年的IC绝对值特别低。但是它在分层回测中还是表现出了不错的单调性。用标准差合成的话，IC绝对值基本上都在0.05以上，但是分成回测的结果就变成了，除了因子值最大的一组外，其他四组基本...,研报 / 成交量 / 日内,"def cal_factors(data):
+    res = []
+    for i in range(5, len(data)):
+        all_price = data[i-5:i, :]
+        sigma = np.nanstd(all_price)
+        mu = np.nanmean(all_price)
+        if data[i-1, 2] > sigma + mu:
+            res.append('u')
+        elif data[i-1, 2] < mu - sigma:
+            res.append('l')
+        else:
+            res.append('b')
+    return res",2025-04-29_成交量协同，又是一个计算了5小时的因子，效果比灾后重建好！.py,caochunxiao
+2025-04-30,同价成交量分布中alpha因子，IC和分层回测都还不错,volume,yes,minute_unspecified,close|high|low|turnover|volume,,35,,总结：vsa\_high2min因子在IC上表现更好，但是分层回测就不如vsa\_ratio了。,研报 / 成交量 / 趋势,"def cal_factors(data):
+    close = data.iloc[-1, 0]
+    high = np.nanmax(data.iloc[:, 0])
+    low = np.nanmin(data.iloc[:, 0])
+
+    data = data.groupby('close').sum()
+    data.reset_index(inplace=True)
+
+    vol = data['volume'].sum()
+    vol_thd50 = vol * 0.5
+
+    idx = np.argmax(data['volume'])
+    data['diff'] = np.abs(data['close'] - data.iloc[idx, 0])
+    data.sort_values(by=['diff', 'volume'], ascending=[True, False], inplace=True)
+    
+    cur_vol = 0
+    for i in range(len(data)):
+        cur_vol += data.iloc[i, 1]
+        if cur_vol >= vol_thd50:
+            data = data.iloc[:i + 1]
+            break
+    vsa_high = data['close'].max()
+    vsa_low = data['close'].min()
+    return [vsa_high / low, vsa_low / high, vsa_low / close]",2025-04-30_同价成交量分布中alpha因子，IC和分层回测都还不错.py,zhengzhaolei
+2025-05-01,协同价差，跑了三个通宵，最后用18个小时跑了1800天的数据，结果居然这样！,volume,yes,minute_unspecified,close|volume,joblib,46,,总结：这个因子和研报的差距还是有一点点的，可能是因为没有去掉ST的原因，也可能是没有理解到研报的精髓吧，但是我想我应该不会再复现它了吧。用标准差合成月度因子IC会高一点点，但是分层回测会更差，所以就展示了一下用均值合成的记过。,研报 / 复杂 / 成交量,"def cal_factors(self, tar):
+    res = 0
+    for key in ['ret_dir', 'ret_ma5_dir', 'vol_ma5_dir']:
+        tmp_data = self.__getattribute__(key)
+        tar_data = tmp_data[tar]
+        tmp_data = tmp_data.drop(columns=[tar])
+        res += tmp_data.mul(tar_data, axis=0).sum()
+        res += (1 - tmp_data).mul(1 - tar_data, axis=0).sum()
+    res.sort_values(inplace=True, ascending=False)
+    res = res.iloc[:30]
+    ex = self.ret_daily.loc[tar] - self.ret_daily.reindex(res.index).mean()
+    return ex",2025-05-01_协同价差，跑了三个通宵，最后用18个小时跑了1800天的数据，结果居然这样！.py,caochunxiao
+2025-05-01,收益率极值，IC虽然不高，但确是一个难得一见的多头因子！,other,yes,1min_inferred,close|open,,19,,总结：虽然这一系列因子的IC不是很高，但是从分层回测的结果来看，因子值最小的一组收益率居然遥遥领先其他四组。如此看来，确实是一个难得一见的多头因子，毕竟在之前的研报复现中，绝大多数都是空头因子。,研报 / 收益率 / 高斯混合 / 跳价期 / 跳价,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open'])
+    dfs = data.to_dataframes()
+    ret = dfs['close'].pct_change(1)
+    thd = ret.quantile([0.1, 0.9]).values
+    up = ret > thd[1:, :]
+    low = ret < thd[0:1, :]
+    max_freq = up.mean(axis=0)
+    min_freq = low.mean(axis=0)
+    max_val = (ret * np.where(up, 1, np.nan)).mean(axis=0) / thd[1]
+    min_val = (ret * np.where(low, 1, np.nan)).mean(axis=0) / thd[0]
+    res = pd.concat([max_freq, min_freq, max_val, min_val], axis=1)
+    res.columns = ['max_freq', 'min_freq', 'max_val', 'min_val']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-01_收益率极值，IC虽然不高，但确是一个难得一见的多头因子！.py,zhengzhaolei
+2025-05-02,日内时间分域Alpha因子，复现结论和研报一致,volatility,yes,minute_unspecified,close|open|volume,,16,,总结：从笔者的复现结果来看，确实最后一个因子的效果最好。,研报 / 成交量 / 波动率 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume'])
+    dfs = data.to_dataframes()
+    ret = dfs['close'] / dfs['open'] - 1
+    lh_rtndiff = (data.data[29, 1, :] / data.data[0, 2, :] - 1) / (data.data[-1, 1, :] / data.data[-30, 2, :] - 1)
+    lh_rtndiff = pd.Series(data=lh_rtndiff, index=ret.columns.tolist())
+    lh_voldiff = dfs['volume'].iloc[:30].sum() / dfs['volume'].iloc[-30:].sum()
+
+    lh_stdiff = ret.iloc[:30].std() / ret.iloc[-30:].std()
+    res = pd.concat([lh_rtndiff, lh_voldiff, lh_stdiff], axis=1)
+    res.columns = ['lh_rtndiff', 'lh_voldiff', 'lh_stddiff']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-02_日内时间分域Alpha因子，复现结论和研报一致.py,zhengzhaolei
+2025-05-03,日内价格分域，IC表现不错，分层回测相对一般,volatility,yes,minute_unspecified,close|high|low|open|volume,,22,,总结：这三个因子复现结果和研报不太一样了，笔者用标准差合成月度因子之后，IC绝对值最高的是第二个因子，同时它在IC上的表现也好于上一篇文章介绍的那三个。,研报 / 复杂 / 成交量 / 波动率 / 5分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume', 'high', 'low'])
+    dfs = data.to_dataframes()
+    ret = dfs['close'] / dfs['open'] - 1
+
+    high_idx = (dfs['high'].rank(pct=True, axis=0)).rolling(15).mean().idxmax().iloc[1:]
+    low_idx = (dfs['low'].rank(pct=True, axis=0)).rolling(15).mean().idxmin().iloc[1:]
+    diff_idx = high_idx - low_idx
+
+    sigma = ret.rolling(15).std()
+    vol = dfs['volume'].div(dfs['volume'].sum(axis=0), axis=1)
+    vol = vol.rolling(15).sum()
+    sigma = (pd.Series({col: sigma.loc[row, col] for col, row in high_idx.items()}) -
+             pd.Series({col: sigma.loc[row, col] for col, row in low_idx.items()}))
+    vol = (pd.Series({col: vol.loc[row, col] for col, row in high_idx.items()}) -
+             pd.Series({col: vol.loc[row, col] for col, row in low_idx.items()}))
+    res = pd.concat([diff_idx, sigma, vol], axis=1)
+    res.columns = ['diff_idx', 'diff_std', 'diff_vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-03_日内价格分域，IC表现不错，分层回测相对一般.py,zhengzhaolei
+2025-05-05,自身显著性和自身显著性反转因子，原来写因子可以如此简单！,volatility,yes,30min_inferred,close|open|volume,,38,,总结：前两个因子都是用均值合成效果更好，后面的因子和收益率扯上了关系之后，就变成了标准差合成效果更好了。所以上面的因子评价结果，除了前两个，后面的都是标准差合成的结果。,研报 / 成交量 / 波动率 / 反转 / 收益率,"def cal_factors(data, idx):
+    data = data.iloc[idx]
+    res = np.abs(data.sub(data.mean(axis=0), axis=1))
+    res = res / data.abs().add(data.abs().mean(axis=0), axis=1)
+    return res",2025-05-05_自身显著性和自身显著性反转因子，原来写因子可以如此简单！.py,zhengzhaolei
+2025-05-06,结构化反转，IC很稳定也算是一个优点！,volume,yes,minute_unspecified,close|open|volume,,19,,总结：这个因子用标准差合成后的IC还是非常稳定的。不过，IC的绝对值和之前复现的因子相比并不是很高，分层回测的结果也相对一般。或许，应该用过去21个交易日的分钟数据一起来计算因子，效果可能会更好,研报 / 成交量 / 反转 / 动量 / 收益率,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open'])
+    ret = np.log(data.to_dataframe('close') / data.to_dataframe('open'))
+    vol = data.to_dataframe('volume')
+    date_str = file_name.split('.')[0]
+
+    thd = vol.quantile(0.1)
+    flag = vol > thd
+    rev_flag = np.where(flag, 1, np.nan)
+    mom_flag = np.where(flag, np.nan, 1)
+
+    rev_weights = vol * rev_flag
+    rev_weights = rev_weights.div(rev_weights.sum(axis=0), axis=1)
+
+    mom_weights = 1 / (vol * mom_flag)
+    mom_weights = mom_weights.replace(np.inf, np.nan).replace(-np.inf, np.nan)
+    mom_weights = mom_weights.div(mom_weights.sum(axis=0), axis=1)
+
+    rev = (rev_weights * ret).sum(axis=0) - (mom_weights * ret).sum(axis=0)
+    rev.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return rev",2025-05-06_结构化反转，IC很稳定也算是一个优点！.py,qinchuantao
+2025-05-07,高频类反转因子，和之前分域思想很像！,volume,yes,5min_inferred,close|open|volume,,52,,总结：开盘反转因子无论用什么方式加权都不太行，去开盘反转因子的话用成交量加权好于等权。其他的几个因子就差不多了。,研报 / 成交量 / 反转 / 动量 / 收益率,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    if idx < 20:
+        return pd.DataFrame(columns=['code', 'datetime', 'rev_rev', 'rev_mom', 'rev_struct',
+                                     'rev_hf', 'rev_no_open', 'rev_no_open_vol', 'rev_open', 'rev_open_vol'])
+    ret = []
+    vol = []
+    for i in range(idx-20, idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open'])
+        ret.append(np.log(data.to_dataframe('close') / data.to_dataframe('open')))
+        vol.append(data.to_dataframe('volume'))
+    date_str = file_name.split('.')[0]
+
+    ret = pd.concat(ret)
+    vol = pd.concat(vol)
+    thd = vol.quantile(0.1)
+    flag = vol > thd
+    rev_flag = np.where(flag, 1, np.nan)
+    mom_flag = np.where(flag, np.nan, 1)
+
+    rev_weights = vol * rev_flag
+    rev_weights = rev_weights.div(rev_weights.sum(axis=0), axis=1)
+    rev_rev = (rev_weights * ret).sum(axis=0)
+    
+    mom_weights = 1 / (vol * mom_flag)
+    mom_weights = mom_weights.replace(np.inf, np.nan).replace(-np.inf, np.nan)
+    mom_weights = mom_weights.div(mom_weights.sum(axis=0), axis=1)
+    rev_mom = (mom_weights * ret).sum(axis=0)
+
+    rev_struct = rev_rev - rev_mom
+
+    weights = vol.div(vol.sum(axis=0), axis=1)
+    rev_hf = (ret * weights).sum(axis=0)
+
+    ret['flag'] = self.get_flag(ret)
+    vol['flag'] = self.get_flag(vol)
+
+    weights_no_open = vol[vol['flag']]
+    weights_no...",2025-05-07_高频类反转因子，和之前分域思想很像！.py,qinchuantao
+2025-05-08,一阶相关系数基础因子，还是有不错的因子的！,volume,yes,1min_inferred,close|high|low|open|volume,,20,,总结：这四个因子中，第二个因子和第四个因子的表现还是不错的。这一点和研报的结论有一部分相似，研报中IC最高的是第二个因子，但是最低的是最后一个因子。,研报 / 成交量 / 收益率,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'high', 'low'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume').iloc[2:-2]
+    vol = vol.div(vol.sum(axis=0), axis=1)    
+    ret = (data.to_dataframe('close') / data.to_dataframe('open')).iloc[2:-2] - 1
+    amp = (data.to_dataframe('high') / data.to_dataframe('low')).iloc[2:-2] - 1
+
+    rvc_cor = ret.corrwith(vol)
+    rhl_cor = ret.corrwith(amp)
+
+    flag = np.where(ret > 0, 1, np.nan)
+    voh_cor = (ret * flag).corrwith(vol * flag)
+
+    flag = np.where(flag==1, np.nan, 1)
+    vol_cor = (ret * flag).corrwith(vol * flag)
+
+    res = pd.concat([rvc_cor, rhl_cor, voh_cor, vol_cor], axis=1)
+    res.columns = ['rvc_cor', 'rhl_cor', 'voh_cor', 'vol_cor']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-08_一阶相关系数基础因子，还是有不错的因子的！.py,zhengzhaolei
+2025-05-09,一阶相关性差，一下又多了四个因子，而且IC大幅提升！,volume,none,no_code,,,0,,正收益相关性差,成交量 / 收益率 / 相关性,,2025-05-09_一阶相关性差，一下又多了四个因子，而且IC大幅提升！.py,general
+2025-05-10,交易时间下的基础性因子，代码修改了三次，好在IC很不错哟！,volume,yes,unclear,,,53,cutVol\_timeMean2,,研报 / 复杂 / 成交量,"def cal_factors(data):
+    close, time_list = [], [0]
+    thd = round(np.nansum(data[:, 0]) / 50, 2)
+    if thd == 0:
+        return [np.nan] * 6
+    cur_vol, cur_close = 0, 0
+
+    for i in range(len(data)):
+        diff = round(thd - cur_vol, 2)
+        if data[i, 0] is None:
+            continue
+        if diff - data[i, 0] <= 0.01:
+            cur_close += data[i, 1] * diff / thd
+            close.append(cur_close)
+            cur_vol = (data[i, 0] - diff)
+            time_list.append(i + 1)
+            while thd - cur_vol <= 0.01:
+                time_list.append(i+1)
+                close.append(data[i, 1])
+                cur_vol -= thd
+            else:
+                cur_close = cur_vol * data[i, 1] / thd
+        else:
+            cur_close += data[i, 0] * data[i, 1] / thd
+            cur_vol += data[i, 0]
+    time_list = np.diff(time_list)
+    time_list_2 = np.diff(time_list)
+    ret = np.diff(close) / np.array(close)[:-1]
+    return [np.mean(time_list), np.var(time_list), np.mean(ret), np.var(ret),
+            np.mean(time_list_2), np.var(time_list_2)]",2025-05-10_交易时间下的基础性因子，代码修改了三次，好在IC很不错哟！.py,zhengzhaolei
+2025-05-11,交易时间间隔的一阶自相关性，4年IC绝对值超过0.1！,other,yes,unclear,,,39,,,研报 / 收益率 / 自相关 / 相关性,"def cal_factors(self, data):
+    close, time_list = [], [0]
+    thd = np.nansum(data[:, 0]) / 50
+    if thd == 0:
+        return [np.nan] * 2
+    cur_vol, cur_close = 0, 0
+
+    for i in range(len(data)):
+        diff = thd - cur_vol
+        if data[i, 0] is None:
+            continue
+        if diff - data[i, 0] <= 0.01:
+            cur_close += data[i, 1] * diff / thd
+            close.append(cur_close)
+            cur_vol = (data[i, 0] - diff)
+            time_list.append(i + 1)
+            while thd - cur_vol <= 0.01:
+                time_list.append(i+1)
+                close.append(data[i, 1])
+                cur_vol -= thd
+            else:
+                cur_close = cur_vol * data[i, 1] / thd
+        else:
+            cur_close += data[i, 0] * data[i, 1] / thd
+            cur_vol += data[i, 0]
+    time_list = np.diff(time_list)
+    ret = np.diff(close) / np.array(close)[:-1] > 0
+    ret = np.insert(ret, 0, close[0] > data[0, 1])
+    bucket = np.where(ret, 1, -1) * time_list
+    pos_prob = self.cal_entropy(bucket[bucket > 0], len(bucket))
+    neg_prob = self.cal_entropy(np.abs(bucket[bucket < 0]), len(bucket))
+    cutVol_entropy = -1 * (pos_prob + neg_prob)
+
+    time_series = pd.Series(data=time_list)
+    cutVol_timeCor = time_series.shift(1).corr(time_series)
+    return cutVol_entropy, cutVol_timeCor",2025-05-11_交易时间间隔的一阶自相关性，4年IC绝对值超过0.1！.py,zhengzhaolei
+2025-05-12,转移熵系列因子，不会写代码，那就调包吧！,volume,yes,minute_unspecified,close|high|low|open|turnover|volume,,47,,,研报 / 成交量 / 收益率,"def cal_factors(x, y1, y2):
+    flag1 = ~np.isnan(x) & ~np.isnan(y1)
+    if not np.any(flag1):
+        return [np.nan] * 4
+    flag2 = ~np.isnan(x) & ~np.isnan(y2)
+    x = np.digitize(x, np.linspace(np.nanmin(x), np.nanmax(x), 10))
+    y1 = np.digitize(y1, np.linspace(np.nanmin(y1), np.nanmax(y1), 10))
+    y2 = np.digitize(y2, np.linspace(np.nanmin(y2), np.nanmax(y2), 10))
+    te_r2m, te_m2r, te_r2v, te_v2r = 0, 0, 0, 0
+    for i in range(1, 4, 1):
+        te_r2m += pyinform.transfer_entropy(x[flag1], y1[flag1], k=i)
+        te_m2r += pyinform.transfer_entropy(y1[flag1], x[flag1], k=i)
+        te_r2v += pyinform.transfer_entropy(x[flag2], y2[flag2], k=i)
+        te_v2r += pyinform.transfer_entropy(y2[flag2], x[flag2], k=i)
+    return [te_r2m / 3, te_m2r / 3, te_r2v / 3, te_v2r / 3]",2025-05-12_转移熵系列因子，不会写代码，那就调包吧！.py,zhengzhaolei
+2025-05-13,v型特征基础因子，整体表现比较一般！,volume,yes,unclear,,,28,,,成交量 / 收益率,"def cal_factors(data):
+    rv_cum = []
+    time_cum = []
+    tmp_cum = data.iloc[0]
+    for i in range(1, len(data)):
+        tmp_rv = data.iloc[i]
+        if tmp_cum > 0 and tmp_rv > 0:
+            tmp_cum += tmp_rv
+        elif tmp_cum < 0 and tmp_rv < 0:
+            tmp_cum += tmp_rv
+        else:
+            rv_cum.append(tmp_cum)
+            if not time_cum:
+                time_cum.append(i)
+            else:
+                time_cum.append(i - time_cum[-1])
+            tmp_cum = tmp_rv
+
+    rv_v = []
+    rv_weight_v = []
+    for i in range(1, len(rv_cum)):
+        condition = rv_cum[i-1] + rv_cum[i]
+        if rv_cum[i-1] < 0  and condition < 0:
+            rv_v.append(np.abs(condition))
+            rv_weight_v.append(rv_v[-1] / (time_cum[i-1] + time_cum[i]))
+    if not rv_v:
+        return [np.nan] * 4
+    return [np.mean(rv_v), np.max(rv_v), np.mean(rv_weight_v), np.max(rv_weight_v)]",2025-05-13_v型特征基础因子，整体表现比较一般！.py,zhengzhaolei
+2025-05-14,一阶自相关性，本以为是很差的因子，没想到居然有3年IC绝对值超过0.1！,volume,yes,minute_unspecified,close|open|turnover|volume,,18,,总结：虽然一阶自相关性因子的计算非常简单，但是效果还是不错的，rtn\_foc这个因子的IC绝对值虽然不是很高，但是分层回测的表现比很多IC绝对值更高的因子还要好一点点。至于vol\_foc这个因子就不用说了，IC绝对值高，有3年IC绝对值...,研报 / 成交量 / 收益率 / 自相关 / 相关性,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    vol = vol.div(vol.sum(axis=0), axis=1)
+    money = data.to_dataframe('turnover')
+    money = money.div(money.sum(axis=0), axis=1)
+    ret = (data.to_dataframe('close') / data.to_dataframe('open')) - 1
+
+    rtn_foc = ret.shift(1).corrwith(ret)
+    vol_foc = vol.shift(1).corrwith(vol)
+    money_foc = money.shift(1).corrwith(money)
+
+    res = pd.concat([rtn_foc, vol_foc, money_foc, money_foc - vol_foc], axis=1)
+    res.columns = ['rtn_foc', 'vol_foc', 'money_foc', 'diff']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-14_一阶自相关性，本以为是很差的因子，没想到居然有3年IC绝对值超过0.1！.py,zhengzhaolei
+2025-05-15,DW统计量，也是一个计算一阶自相关性的方法，效果会和直接计算一样好吗？,volume,yes,minute_unspecified,close|open|turnover|volume,,18,,总结：看来DW统计量和自相关性的差异还是挺大的，至少从笔者的复现情况来看是这样的。值得一提的是，在研报中，用DW统计量也会使IC绝对值下降，但是好像也没有笔者复现的结果这么夸张。,研报 / 成交量 / 收益率 / 自相关 / 相关性,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    vol = vol.div(vol.sum(axis=0), axis=1)
+    money = data.to_dataframe('turnover')
+    money = money.div(money.sum(axis=0), axis=1)
+    ret = (data.to_dataframe('close') / data.to_dataframe('open')) - 1
+
+    rtn_dw = np.square(ret.diff()).sum() / np.square(ret.sum())
+    vol_dw = np.square(vol.diff()).sum() / np.square(vol.sum())
+    money_dw = np.square(money.diff()).sum() / np.square(money.sum())
+
+    res = pd.concat([rtn_dw, vol_dw, money_dw, money_dw - vol_dw], axis=1)
+    res.columns = ['rtn_dw', 'vol_dw', 'money_dw', 'diff']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-15_DW统计量，也是一个计算一阶自相关性的方法，效果会和直接计算一样好吗？.py,zhengzhaolei
+2025-05-16,高波动率收益相关因子，和波动率相关性0.74！,volatility,yes,minute_unspecified,close,,12,,总结：这个因子有点难评阿，用均值合成的话IC绝对值不高，分层回测也不好。用标准差合成的话，也就IC绝对值高点，分层回测可以说是一般，同时这个因子和传统的21日波动率有着极高的相关性。由于该因子用到了分钟级别的数据，其计算起来的复杂度也是远高...,研报 / 波动率 / 残差 / 收益率 / 自相关,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+    date_str = file_name.split('.')[0]
+
+    ret = data.to_dataframe('close').pct_change(5)
+    sigma = ret.rolling(30).std()
+    thd = sigma.quantile(0.8)
+    flag = sigma > thd
+    ret = (ret * np.where(flag, 1, np.nan)).mean()
+    ret.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return ret",2025-05-16_高波动率收益相关因子，和波动率相关性0.74！.py,zhengzhaolei
+2025-05-17,个股非同步性交易的高阶自相关性，分层回测还挺单调的！,other,yes,minute_unspecified,close|open|turnover|volume,,21,,至于另外两个，它们用统计量的标准差计算之后，无论是用均值还是标准差合成月度因子，相对于用统计量均值计算的结果没有任何一个方面的提升，所以也就失去了展现的价值，各位读者可以自行尝试复现以下。,研报 / 残差 / 自相关 / 相关性,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    vol = vol.div(vol.sum(axis=0), axis=1)
+    money = data.to_dataframe('turnover')
+    money = money.div(money.sum(axis=0), axis=1)
+    ret = (data.to_dataframe('close') / data.to_dataframe('open')) - 1
+
+    res = []
+    for i in range(len(ret.columns)):
+        rtn_lbq = sm.tsa.stattools.acf(ret.iloc[:, i], nlags=48, qstat=True)[1]
+        vol_lbq = sm.tsa.stattools.acf(vol.iloc[:, i], nlags=48, qstat=True)[1]
+        money_lbq = sm.tsa.stattools.acf(money.iloc[:, i], nlags=48, qstat=True)[1]
+        res.append([np.mean(rtn_lbq), np.mean(vol_lbq), np.mean(money_lbq)])
+
+    res = pd.DataFrame(data=res, columns = ['rtn_lbq', 'vol_lbq', 'money_lbq'], index=ret.columns.tolist())
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    res['diff'] = res['money_lbq'] - res['vol_lbq']
+    return res.reset_index()",2025-05-17_个股非同步性交易的高阶自相关性，分层回测还挺单调的！.py,zhengzhaolei
+2025-05-18,差分标准差因子，没想到桃子姐也有“失手”的时候！,volume,yes,minute_unspecified,turnover|volume,,17,,总结：在笔者复现过的长江证券首席分析师覃川桃老师的因子中，这个因子是表现最差的。当然，这并不一定是因子的问题，可能是笔者没有领悟到精髓。,研报 / 振幅 / 成交量 / 残差 / 自相关,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    vol = (vol.diff()).div(vol.mean(axis=0), axis=1)
+    money = (money.diff()).div(money.mean(axis=0), axis=1)
+    diff = money - vol
+
+    res = [vol.std() / vol.mean(), money.std() / money.mean(), diff.std(), diff.mean()]
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'money', 'diff_std', 'diff_mean']
+    res['diff'] = res['money'] - res['vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-18_差分标准差因子，没想到桃子姐也有“失手”的时候！.py,qinchuantao
+2025-05-19,差分的自相关性，每年IC都超过0.08的因子居然不是最大的惊喜！,other,yes,minute_unspecified,turnover|volume,,17,,总结：如果笔者没记错的话，mcv应该是第一个每一年IC绝对值都超过0.08的？尽管有个因子每年的IC绝对值都超过了0.08，但是它并不是最惊喜的，最惊喜的是第一个因子，也就是成交量差分的一阶自相关性。这个因子有4年的IC绝对值超过了0.1，...,研报 / 自相关 / 相关性 / 差分,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    vol = (vol.diff()).div(vol.mean(axis=0), axis=1)
+    money = (money.diff()).div(money.mean(axis=0), axis=1)
+    money_vol_dis = (np.square(money - vol)).mean()
+
+    res = [vol.shift(1).corrwith(vol), money.shift(1).corrwith(money), vol.corrwith(money), money_vol_dis]
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'money', 'mcv', 'money_vol_dis']
+    res['diff'] = res['money'] - res['vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-19_差分的自相关性，每年IC都超过0.08的因子居然不是最大的惊喜！.py,general
+2025-05-20,一阶残差自相关性因子，终于算完了，结果真是让我大吃一惊！,other,yes,unclear,,,23,,,研报 / 残差 / 自相关 / 相关性,"def lr(data):
+    x = data.iloc[:-1]
+    y = data.iloc[1:]
+    Y_full = y.dropna(axis=1)
+    idx_full, Y_full = Y_full.columns, Y_full.values
+    X_full = np.c_[np.ones((len(x), 1)), x.loc[:, idx_full].values]
+    beta_full = np.linalg.pinv(X_full.T @ X_full) @ X_full.T @ Y_full
+    resi = Y_full - X_full @ beta_full
+    resi = pd.DataFrame(data=resi, columns=idx_full)
+
+    for c in set(y.columns) - set(idx_full):
+        y_lack = y.loc[:, c]
+        x_lack = x.loc[:, c]
+        idx = x_lack.dropna().index.intersection(y_lack.dropna().index)
+
+        if len(idx) < 30:
+            resi[c] = np.nan
+            continue
+        X_lack = x_lack.reindex(idx)
+        Y_lack = y_lack.reindex(idx).values
+        X_lack = np.c_[np.ones(len(X_lack)), X_lack.values]
+        beta_lack = np.linalg.pinv(X_lack.T @ X_lack) @ X_lack.T @ Y_lack
+        resi[c] = y_lack - np.c_[np.ones(len(x_lack)), x_lack.values] @ beta_lack
+    return resi",2025-05-20_一阶残差自相关性因子，终于算完了，结果真是让我大吃一惊！.py,zhengzhaolei
+2025-05-21,差分绝对值均值因子，虽然用的不是每笔成交数据，但结果也还算惊艳！,volume,yes,minute_unspecified,turnover|volume,,17,,总结：这个因子相对于差分标准差因子的改变微乎其微，但是取得的效果却是显著的，用王力宏的一句歌词来形容那便是“一点点改变有很大的差别”。,研报 / 成交量 / 差分 / 日频,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    vol = np.abs((vol.diff()).div(vol.mean(axis=0), axis=1))
+    money = np.abs((money.diff()).div(money.mean(axis=0), axis=1))
+    diff = money - vol
+
+    res = [vol.mean(), money.mean(), diff.std(), diff.mean()]
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'money', 'diff_std', 'diff_mean']
+    res['diff'] = res['money'] - res['vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-21_差分绝对值均值因子，虽然用的不是每笔成交数据，但结果也还算惊艳！.py,qinchuantao
+2025-05-22,在一个表现已经很好的因子上，计算一次一阶自相关性，效果会更好吗？,other,yes,minute_unspecified,turnover|volume,,17,,总结：只能说这个因子没有带来任何惊喜。,研报 / 自相关 / 相关性 / 差分,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    vol = np.abs((vol.diff()).div(vol.mean(axis=0), axis=1))
+    money = np.abs((money.diff()).div(money.mean(axis=0), axis=1))
+    money_vol_dis = (np.square(money - vol)).mean()
+
+    res = [vol.shift(1).corrwith(vol), money.shift(1).corrwith(money), vol.corrwith(money), money_vol_dis]
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'money', 'mcv', 'money_vol_dis']
+    res['diff'] = res['money'] - res['vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-22_在一个表现已经很好的因子上，计算一次一阶自相关性，效果会更好吗？.py,general
+2025-05-23,成交量波峰计数因子，不得不说一句桃子姐牛X！,volume,yes,minute_unspecified,turnover|volume,,17,,总结：这个因子使用均值合成的。如果用标准差的话，IC绝对值最高的一年也才刚刚超过0.03而已。这个因子可以说是在IC和分层回测上的表现都还是不错的，IC绝对值超过0.1的有三年，没超过0.08的只有2024年这一年。分层回测方面，IC值最小...,研报 / 成交量 / 收益率 / 趋势 / 日内,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+
+    vol_cnt = (vol >= (vol.mean() + vol.std()))
+    vol_cnt = (vol_cnt == True) * (vol_cnt.shift(1) == False)
+    money_cnt = (money >= (money.mean() + money.std()))
+    money_cnt = (money_cnt == True) * (money_cnt.shift(1) == False)
+
+    res = [vol_cnt.sum(), money_cnt.sum()]
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol_cnt', 'money_cnt']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-23_成交量波峰计数因子，不得不说一句桃子姐牛X！.py,qinchuantao
+2025-05-30,锚定发转因子，思路很棒的一个因子！,reversal,yes,1day,close|high|low,,10,,总结：这个因子显然不如直接计算的反转因子。不过，我们可以学习一下其中的心理学思想。,研报 / 反转 / 锚定,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close', 'high', 'low']
+                                         ).to_dataframes()
+    flag = data['close'] < data['close'].shift(21)
+    anchor = data['high'].rolling(21).max() * flag + (1 - flag) * data['low'].rolling(21).min()
+    res = data['close'] / anchor - 1
+    res.index.name = 'datetime'
+    res.reset_index(inplace=True)
+    res = pd.melt(res, id_vars='datetime', var_name='code', value_name='anchoring_reverse')
+    res.to_parquet('./anchoring_reverse.parquet')",2025-05-30_锚定发转因子，思路很棒的一个因子！.py,general
+2025-05-31,价格差分自相关系数，居然是一个多投因子！,volume,yes,minute_unspecified,close,,18,,总结：这个因子复现的时候其实是没有什么期待的，没想到居然是一个看起来还行的多头因子。这系列因子中需要注意的是，正差分相关性和负差分相关性计算的时候可能会因为数据太短导致相关性为nan的情况。笔者简单粗暴，直接没有填充。然后，合成月度因子的时...,研报 / 成交量 / 收益率 / 自相关 / 相关性,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+    date_str = file_name.split('.')[0]
+
+    price = data.to_dataframe('close').diff()
+    price_delay1 = price.shift(1)
+    self_corr = price_delay1.corrwith(price)
+
+    flag = (price > 0) * (price_delay1 > 0)
+    self_corr_plus = price_delay1[flag].corrwith(price[flag])
+
+    flag = (price < 0) * (price_delay1 < 0)
+    self_corr_minus = price_delay1[flag].corrwith(price[flag])
+
+    res = [self_corr, self_corr_plus, self_corr_minus]
+    res = pd.concat(res, axis=1)
+    res.columns = ['self_corr', 'self_corr_plus', 'self_corr_minus']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-05-31_价格差分自相关系数，居然是一个多投因子！.py,general
+2025-06-02,长端动量因子，一个2023年IC超过0.1的动量因子！,reversal,yes,1day,close|high|low,tqdm,19,,总结：在2018年到2024年底的回测区间中，这个因子在大部分时间表现都比较平庸，IC绝对值并不是很高。但是，在2023年其IC绝对值却超过了0.1。同时，这个因子在整个回测区间中，分层回测的年化收益率呈现了非常不错的单调性，虽然在2023...,研报 / 振幅 / 反转 / 动量 / 收益率,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close', 'high', 'low']
+                                         ).to_dataframes()
+    amp = data['high'] / data['low'] - 1
+    ret = data['close'].pct_change()
+    res = []
+    for i in tqdm(range(160, len(amp))):
+        tmp_amp = amp.iloc[i-160:i]
+        day = tmp_amp.iloc[[-1]].index.tolist()[0]
+        q70 = tmp_amp.quantile(0.7)
+        tmp_amp = np.where(tmp_amp < q70, 1, np.nan)
+        tmp_ret = (ret.iloc[i-160:i] * tmp_amp).sum()
+        tmp_ret.name = day
+        res.append(tmp_ret)
+    res = pd.concat(res, axis=1).T
+    res.index.name = 'datetime'
+    res.reset_index(inplace=True)
+    res = pd.melt(res, id_vars='datetime', var_name='code', value_name='long_mon')
+    res.to_parquet('./long_mon.parquet')",2025-06-02_长端动量因子，一个2023年IC超过0.1的动量因子！.py,weijianrong
+2025-06-03,加速度动量因子，台湾老铁的因子来到大A会不会水土不服？,momentum,yes,unclear,,,31,,,研报 / 动量 / 加速度 / 趋势 / 日频,"def process_single_day(self, idx):
+    tmp_y = self.data.iloc[idx - 21:idx].dropna(how='all', axis=1)
+    Y_full = tmp_y.dropna(axis=1)
+    idx_full, Y_full = Y_full.columns, Y_full.values
+
+    tmp_y['t'] = np.arange(1, 22, 1)
+    tmp_y['t_square'] = np.square(tmp_y['t'])
+    X_full = np.c_[np.ones((21, 1)), tmp_y[['t', 't_square']].values]
+    beta_full = np.linalg.pinv(X_full.T @ X_full) @ X_full.T @ Y_full
+    r2 = compute_r_squared(X_full @ beta_full, Y_full)
+    factor_full = pd.DataFrame(data=beta_full.T, index=idx_full, columns=['alpha', 'beta', 'gama'])
+    factor_full['r2'] = r2
+
+    factor_lack = {}
+    for c in set(tmp_y.columns) - set(idx_full) - {'t', 't_square'}:
+        lack_tmp_y = tmp_y.loc[:, [c, 't', 't_square']].copy()
+        lack_tmp_y = lack_tmp_y.dropna()
+        lack_tmp_x = lack_tmp_y[['t', 't_square']]
+        if len(lack_tmp_y) < 10:
+            factor_lack[c] = [np.nan] * 4
+            continue
+        X_lack = np.c_[np.ones(len(lack_tmp_y)), lack_tmp_x.values]
+        Y_lack = lack_tmp_y.drop(columns=['t', 't_square']).values
+        beta_lack = np.linalg.pinv(X_lack.T @ X_lack) @ X_lack.T @ Y_lack
+        r2 = compute_r_squared(X_lack @ beta_lack, Y_lack)
+        factor_lack[c] = np.hstack((beta_lack.reshape(-1), r2))
+    if factor_lack:
+        factor_lack = pd.DataFrame(factor_lack).T
+        factor_lack.columns = ['alpha', 'beta', 'gama', 'r2']
+        factor_full = pd.concat([factor_full, factor_lack])
+    factor_full['datetime'] = tmp_y.ind...",2025-06-03_加速度动量因子，台湾老铁的因子来到大A会不会水土不服？.py,general
+2025-06-04,基于成交量的资金流入占比，期货因子用在股票会怎么样呢？,volume,yes,5min_inferred,close|turnover|volume,,13,,总结：这个因子无论用均值合成还是用标准差合成，其在IC上的表现都不是很好。用标准差合成的因子IC为负，2018年到2020年这三年的IC接近于0。用均值合成的也没好到哪里去，从上面的图中可以看出，2018年和2019年的IC为负，其他年份为...,研报 / 成交量 / 资金流入 / 资金流 / 1分钟,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover', 'close'])
+    date_str = file_name.split('.')[0]
+
+    dfs = data.to_dataframes()
+    dfs['flag'] = dfs['close'].diff()
+    dfs['flag'] = dfs['flag'] / dfs['flag'].abs()
+    dfs['flag'] = dfs['flag'].fillna(0)
+    res = dfs['volume'] * dfs['close'] * dfs['flag']
+    res = res.sum() / dfs['turnover'].sum()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-06-04_基于成交量的资金流入占比，期货因子用在股票会怎么样呢？.py,general
+2025-06-05,时间网络相对中心度，一个简单却还算有效的因子,other,yes,1day,close,,11,,总结：这个因子的计算确实挺简单的，但是IC还是很不错的，在整个回测区间里有8年的IC绝对值超过了0.08。,研报 / 收益率,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close']
+                                         ).to_dataframe('close')
+    ret = data.pct_change()
+    ret_21 = ret.abs().rolling(21).mean()
+    ret = ret.sub(ret.mean(axis=1), axis=0).div(ret.std(axis=1), axis=0)
+    ret = np.square(ret)
+    ret = 1 / ret.rolling(21).mean()
+    dfs = {'tcc': ret, 'ret_21': ret_21}
+    df = dfs_to_df(dfs)
+    df.to_parquet('./tcc.parquet')",2025-06-05_时间网络相对中心度，一个简单却还算有效的因子.py,caochunxiao
+2025-06-11,拐点，一个被从期货移植到股票的因子,other,yes,minute_unspecified,close|volume,,20,,总结：这个因子如果是用成交量计算的话，还算是一个不错的因子。IC绝对值有四年超过了0.06，而分层回测方面，因子值最高的一组和最低的一组的净值曲线从2021年开始，与其他三组就很少相交了。,研报 / 日内,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume').diff()
+    price = data.to_dataframe('close').diff()
+    vol = vol.replace(0.0, np.nan)
+    price = price.replace(0.0, np.nan)
+
+    vol = vol.ffill()
+    price = price.ffill()
+
+    vol = ((vol * vol.shift(1)) < 0).sum()
+    price = ((price * price.shift(1)) < 0).sum()
+
+    res = pd.concat([vol, price], axis=1)
+    res.columns = ['vol', 'price']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-06-11_拐点，一个被从期货移植到股票的因子.py,general
+2025-06-13,空间网络相对中心度，曹春晓老师早期的因子，会是什么样的效果呢？,other,yes,1day,close,tqdm,16,,总结：这个因子相对来说中规中矩。有六年的IC超过了0.06，但是只有两年超过了0.08，同时没有任何一年的IC超过了0.1。此外，在分层回测的净值曲线中，虽然因子值最低的一组其净值曲线从2019年开始就与其他四条不相交了，但是因子值最大的一...,研报 / 收益率,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close']
+                                         ).to_dataframe('close')
+    ret = data.pct_change()
+    res = []
+    for i in tqdm(range(21, len(ret))):
+        tmp = ret.iloc[i-21:i]
+        corr = tmp.corr().values
+        np.fill_diagonal(corr, np.nan)
+        corr = np.nanmean(corr, axis=0)
+        dist = 1 / (2 * (1 - corr))
+        res.append(dist)
+    res = pd.DataFrame(data=res, columns=ret.columns.tolist(), index=ret.index.tolist()[21:])
+    res.index.name = 'datetime'
+    res = pd.melt(res.reset_index(), id_vars='datetime', var_name='code', value_name='scc')
+    res.to_parquet('./scc.parquet')",2025-06-13_空间网络相对中心度，曹春晓老师早期的因子，会是什么样的效果呢？.py,caochunxiao
+2025-06-17,一致交易因子，参数对结果的影响有点大,reversal,yes,minute_unspecified,close|high|low|open|volume,,23,,如果该K线的形态就是一根实体K线，而几乎没有上下影线，则有可能表明在这段时间内，各个交易的方向是一致的,研报 / 复杂 / 反转 / 趋势 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'high', 'low', 'volume']).to_dataframes()
+    close = np.abs(data['close'] - data['open'])
+    high = data['high'] - data['low']
+    total_vol = data['volume'].sum()
+    res = []
+    cols = []
+    for thd in range(10, 110, 10):
+        if thd < 100:
+            flag = close <= thd * high / 100
+        else:
+            flag = close == high
+        tmp_vol = data['volume'] * np.where(flag, 1, np.nan)
+        res.append(tmp_vol.sum() / total_vol)
+        cols.append('tcv_{}'.format(thd))
+    res = pd.concat(res, axis=1)
+    res.columns = cols
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-06-17_一致交易因子，参数对结果的影响有点大.py,general
+2025-06-22,成交额占比熵，这个因子较为一般。但是，稍微做下改动，就能天翻地覆！,volume,yes,minute_unspecified,turnover|volume,,19,,总结：虽然成交额占比熵这个因子的表现比较一般，但是将成交额占比熵与成交量占比熵进行差分得到的因子，却有着不错的表现。就是，不知道这个因子和成交额自相关性与成交量自相关性的差分因子相关性是不是也很高，这里笔者就不去验证了。,研报,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover']).to_dataframes()
+    date_str = file_name.split('.')[0]
+
+    vol = data['volume']
+    vol = vol.div(vol.sum(axis=0), axis=1)
+    vol = -1 * vol * np.log(vol)
+    vol = vol.sum()
+
+    amt = data['turnover']
+    amt = amt.div(amt.sum(axis=0), axis=1)
+    amt = -1 * amt * np.log(amt)
+    amt = amt.sum()
+
+    res = pd.concat([vol, amt], axis=1)
+    res.columns = ['vol', 'amt']
+    res['diff'] = res['amt'] - res['vol']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-06-22_成交额占比熵，这个因子较为一般。但是，稍微做下改动，就能天翻地覆！.py,qinchuantao
+2025-06-23,量价关系的高频乐章，连续五年IC绝对值超过0.1！,other,yes,minute_unspecified,close|turnover,,23,,总结：从因子评价结果来看，不去掉收益率为0的情况更好。同时，用均值合成月度因子的表现也更佳。,研报 / 复杂 / 收益率 / 相关性 / 日内,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close']).to_dataframes()
+    ret = np.abs(np.log(1+data['close'].pct_change().shift(1)))
+
+    amt = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        amt.append(BaseDataLoader.load_data(full_path, fields=['turnover']).to_dataframe('turnover'))
+    amt = pd.concat(amt)
+    amt['minute'] = amt.index.hour * 60 + amt.index.minute
+    amt = amt.groupby('minute', as_index=False, group_keys=False).apply(self.z_score)
+
+    res = ret.corrwith(amt)
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-06-23_量价关系的高频乐章，连续五年IC绝对值超过0.1！.py,general
+2025-06-25,成交额一阶自相关性2.0版本，6年IC绝对值超过0.1，其中3年更是超过了0.12！,volume,yes,minute_unspecified,turnover|volume,,32,,总结：这个因子用均值合成的效果比较好。如果是用标准差合成的话，那么将只有2023年一年的IC绝对值超过了0.08！同时，在分层回测方面的表现，用标准差合成的也差了很多，其因子值最小的一组（也就是图中的蓝线），收益率居然低于红线和黄线。,研报 / 成交量 / 收益率 / 自相关 / 相关性,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    amt = []
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['turnover', 'volume'])
+        amt.append(data.to_dataframe('turnover'))
+        vol.append(data.to_dataframe('volume'))
+    amt = self.z_score(amt)
+    vol = self.z_score(vol)
+
+    res = [amt.shift(1).corrwith(amt), vol.shift(1).corrwith(vol)]
+    res = pd.concat(res, axis=1)
+    res.columns = ['amt_foc', 'vol_foc']
+    res['diff'] = res['amt_foc'] - res['vol_foc']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-06-25_成交额一阶自相关性2.0版本，6年IC绝对值超过0.1，其中3年更是超过了0.12！.py,general
+2025-07-03,最大涨幅，一个简单的异象因子,other,yes,minute_unspecified,close|open,,13,,,研报 / 收益率 / 流动性 / MAX,"def process_single_day(self, idx):
+
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    thd = rtn.quantile(0.9)
+    rtn = 1 + (rtn * (rtn >= thd))
+    rtn = rtn.fillna(1)
+    rtn = rtn.cumprod()
+    rtn = rtn.iloc[-1]
+    rtn.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return rtn",2025-07-03_最大涨幅，一个简单的异象因子.py,chenshengrui
+2025-07-07,价差偏离度因子，难道是我的打开方式不对？,other,yes,1day,close,joblib,36,,总结：这个因子如果按照研报的方式来合成最终的因子，那么它在2018年之后的表现从IC上来看是远不如2018年之前的。如果是用均值合成的话，那么2013年和2019年这两年的IC和其他年份完全相反。,研报,"def process_single_day(self, idx):
+    ret = self.ret.iloc[idx - 252:idx].dropna(how='all', axis=1)
+    price = self.data.iloc[idx-1].dropna()
+    ret = ret.reindex(price.index, axis=1)
+
+    ret = ret.corr()
+    ret.reset_index(inplace=True, drop=True)
+    mask_matrix = np.eye(len(ret), dtype=bool)
+    ret = ret.mask(mask_matrix)
+    flag = ret > ret.quantile(1-10/len(ret))
+
+    ref_price = price.values.reshape(-1, 1) * np.where(flag, 1, np.nan)
+    ref_price = np.nanmean(ref_price, axis=0)
+    price = np.log(price) - np.log(ref_price)
+    return price",2025-07-07_价差偏离度因子，难道是我的打开方式不对？.py,general
+2025-07-14,CVaR因子，IC表现不错，分层回测有待提升！,academic,yes,minute_unspecified,close|open,,10,,总结：从IC上的表现来看，两者都是不错的，都有一年的IC绝对值超过了0.12。不过，用标准差合成的要更好一些，因为它还有两年的IC绝对值超过了0.1。再降低一点标准，比较双方IC绝对值超过0.08的年份，用标准差合成的因子也是多出来一年。同...,研报 / 收益率 / CVaR / 尾部,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open']).to_dataframes()
+    rtn = data['close'] / data['open'] - 1
+    flag = (rtn <= rtn.quantile(0.05))
+    cvar = (rtn * np.where(flag, 1.0, np.nan)).mean()
+    cvar.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return cvar",2025-07-14_CVaR因子，IC表现不错，分层回测有待提升！.py,general
+2025-07-17,VCVaR因子，与CVaR因子相比，分层回测有所提升，但IC却下降了！,academic,none,no_code,,,0,,总结：从IC分析的结果来看，标准差合成的月度因子表现下降的更为厉害。此前，用标准差合成的CVaR因子，有1年的IC绝对值超过了0.12，3年超过0.1，现在的VCVaR因子IC绝对值最高的一年也没有超过0.1。,研报 / 改进 / 成交量 / 收益率 / 相关性,,2025-07-17_VCVaR因子，与CVaR因子相比，分层回测有所提升，但IC却下降了！.py,general
+2025-07-23,高频成交量的峰、岭、谷信息（一）：2025年7月20日应该还热乎的研报，IC和分层回测都还不错,volume,yes,minute_unspecified,volume,,34,,总结：研报当中表示峰和岭这两个因子是有效的，而谷是无效的。从笔者的复现结果来看，似乎也是这样的。,研报 / 成交量,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume'])
+        vol.append(data.to_dataframe('volume'))
+    flag = self.cal_flag(vol)
+    peak = (flag == 1).sum()
+    ridge = (flag == 2).sum()
+    valley = (flag == 0).sum()
+    res = [peak, ridge, valley]
+    res = pd.concat(res, axis=1)
+    res.columns = ['peak', 'ridge', 'valley']
+    # res['diff'] = res['amt_foc'] - res['vol_foc']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-07-23_高频成交量的峰、岭、谷信息（一）：2025年7月20日应该还热乎的研报，IC和分层回测都还不错.py,weijianrong
+2025-07-25,高频成交量的峰、岭、谷信息（二）：分钟收益率因子，整体不如分钟数,volume,yes,minute_unspecified,close|open|volume,,22,,不过，这个因子虽然在IC上的表现有所提升，但是在分层回测上的表现却出现了一些下降。,研报 / 成交量 / 收益率,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open'])
+        vol.append(data.to_dataframe('volume'))
+    flag = self.cal_flag(vol)
+    ret = np.log(data.to_dataframe('close') / data.to_dataframe('open'))
+    ret = ret.reindex(flag.columns, axis=1)
+    res = []
+    for i in range(3):
+        res.append((ret * np.where(flag == i, 1, np.nan)).sum())
+    res = pd.concat(res, axis=1)
+    res.columns = ['peak', 'ridge', 'valley']
+    # res['diff'] = res['amt_foc'] - res['vol_foc']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-07-25_高频成交量的峰、岭、谷信息（二）：分钟收益率因子，整体不如分钟数.py,weijianrong
+2025-07-26,最大异常日收益率，一个超级简单，却还算有效的因子！,reversal,yes,1day,close,,10,,总结：这个因子虽然在计算上很简单，但是它在IC上的表现还是不错的。从2018年到2024年这7年当中，只有2019年和2024年这两年的IC绝对值没有超过0.08。,反转 / 收益率 / 异常 / 日频,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close']
+                                         ).to_dataframes()
+    rtn = data['close'].pct_change()
+    rtn = rtn.sub(rtn.median(axis=1), axis=0).abs()
+    rtn = rtn.rolling(21).max()
+    rtn.index.name = 'datetime'
+    rtn.reset_index(inplace=True)
+    res = pd.melt(rtn, id_vars='datetime', var_name='code', value_name='anchoring_reverse')
+    res.to_parquet('./abnormal_rtn.parquet')",2025-07-26_最大异常日收益率，一个超级简单，却还算有效的因子！.py,general
+2025-07-29,高频成交量的峰、岭、谷信息（三）：相对加权价格因子，这次的结果和研报产生了差异！,smart_money,yes,minute_unspecified,close|volume,,28,,再次总结：用标准差合成的因子在IC上的表现明显好于用均值合成的因子，但是这分层回测的表现依旧不行。,研报 / 成交量 / 聪明钱,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'close'])
+        vol.append(data.to_dataframe('volume'))
+    flag = self.cal_flag(vol)
+
+    vol = data.to_dataframe('volume')
+    vol = vol.reindex(flag.columns, axis=1)
+    close = data.to_dataframe('close')
+    close = close.reindex(flag.columns, axis=1)
+
+    weighted_close = (close * (vol.div(vol.sum(), axis=1))).sum()
+
+    res = []
+    for i in range(3):
+        tmp_flag = np.where(flag == i, 1, np.nan)
+        weight = vol * tmp_flag
+        res.append((close * (weight.div(weight.sum(), axis=1))).sum() / weighted_close)
+    res = pd.concat(res, axis=1)
+    res = res.replace(0.0, np.nan)
+    res.columns = ['peak', 'ridge', 'valley']
+    # res['diff'] = res['amt_foc'] - res['vol_foc']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-07-29_高频成交量的峰、岭、谷信息（三）：相对加权价格因子，这次的结果和研报产生了差异！.py,weijianrong
+2025-08-02,高频成交量的峰、岭、谷信息（四）：加权价格分位点因子，分层回测表现不错！,volume,yes,minute_unspecified,close|high|low|volume,,41,,总结：从IC上的表现来看，这个因子的表现似乎并没有研报中说的那么好。无论是量峰还是量谷计算的加权价格分位数因子，似乎都不太行。但是，从分层回测的结果来看，量峰和量岭的加权价格分位数因子的表现还是不错的，相交的情况并不多，而且单调性也不错。,研报 / 成交量 / 日内,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    vol = []
+    price_range = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        if i == idx - 1:
+            data = BaseDataLoader.load_data(full_path, fields=['volume', 'close'])
+            price_range.append(data.to_dataframe('close').iloc[-1])
+        elif i == idx:
+            data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'high', 'low'])
+            price_range.append(data.to_dataframe('high').max())
+            price_range.append(data.to_dataframe('low').min())
+        else:
+            data = BaseDataLoader.load_data(full_path, fields=['volume'])
+        vol.append(data.to_dataframe('volume'))
+    flag = self.cal_flag(vol)
+
+    price_range = pd.concat(price_range, axis=1)
+    price_range = price_range.reindex(flag.columns)
+    low = price_range.min(axis=1)
+    high = price_range.max(axis=1)
+
+    vol = data.to_dataframe('volume')
+    vol = vol.reindex(flag.columns, axis=1)
+    close = data.to_dataframe('close')
+    close = close.reindex(flag.columns, axis=1)
+
+    res = []
+    for i in range(3):
+        tmp_flag = np.where(flag == i, 1, np.nan)
+        weight = vol * tmp_flag
+        tmp_price = (close * (weight.div(weight.sum(), axis=1))).sum()
+        res.append((tmp_price - low) / (high -  low))
+    res ...",2025-08-02_高频成交量的峰、岭、谷信息（四）：加权价格分位点因子，分层回测表现不错！.py,weijianrong
+2025-08-08,一个瞎编的因子，我想从知情交易者的角度来强行解释一下他,smart_money,yes,minute_unspecified,turnover|volume,,32,,值得一提的是，这个因子无论是用均值合成还是用标准差合成月度因子，其表现都是类似的。只不过，用均值合成的是负相关。,研报 / 成交量 / 相关性,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+
+    amt = []
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['turnover', 'volume'])
+        amt.append(data.to_dataframe('turnover'))
+        vol.append(data.to_dataframe('volume'))
+    amt = self.z_score(amt)
+    vol = self.z_score(vol)
+
+    res = [amt.sum() / 240, vol.sum() / 240, amt.corrwith(vol)]
+    res = pd.concat(res, axis=1)
+    res.columns = ['amt', 'vol', 'corr']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-08-08_一个瞎编的因子，我想从知情交易者的角度来强行解释一下他.py,general
+2025-08-21,高频成交量的峰、岭、谷信息勘误,volume,partial,unclear,,,6,,,研报 / 成交量,"for i in range(3):
+    res.append((ret * np.where(flag == i, 1, np.nan)).sum())
+res = pd.concat(res, axis=1)
+res.columns = ['peak', 'ridge', 'valley']",2025-08-21_高频成交量的峰、岭、谷信息勘误.py,weijianrong
+2025-08-21,高频振幅因子的内部切割，笔者在3月10日提过的因子出现在了大佬的研报中！,other,yes,minute_unspecified,close|high|low|turnover|volume,,19,,差分,研报 / 改进 / 理想振幅 / 振幅 / 日频,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'high', 'low', 'turnover'])
+    date_str = file_name.split('.')[0]
+
+    vol = data.to_dataframe('volume')
+    amp = (data.to_dataframe('high') / data.to_dataframe('low')) - 1
+    money = data.to_dataframe('turnover')
+    close = data.to_dataframe('close')
+
+    res = []
+    for s in [vol, money, close]:
+        thd = s.quantile([0.3, 0.7])
+        amp_series = amp.where(s >= thd.iloc[1]).mean(axis=0) - amp.where(s <= thd.iloc[0]).mean(axis=0)
+        res.append(amp_series)
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'turnover', 'close']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-08-21_高频振幅因子的内部切割，笔者在3月10日提过的因子出现在了大佬的研报中！.py,weijianrong
+2025-08-29,暗流涌动因子，曹春晓老师8月27日最新力作，看看效果如何！,volume,yes,minute_unspecified,volume,,13,,标准差,研报 / 成交量 / 流动性 / 日频 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]    
+    # 加载当日分钟数据    
+    full_path = os.path.join(self.file_pth, file_name)    
+    data = BaseDataLoader.load_data(full_path, fields=['volume'])    
+    vol = data.to_dataframe('volume')    
+    vol = vol.div(vol.sum(axis=1), axis=0).fillna(0)    
+    vol_5min = vol.rolling(5).sum().iloc[list(range(4, 240, 5))]    
+    vol_5min = vol_5min.div(vol.sum(axis=0), axis=1)    
+    res = -(vol_5min * np.log(vol_5min)).sum(axis=0)    
+    res = (res - res.mean()).abs()    
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)    
+    return res",2025-08-29_暗流涌动因子，曹春晓老师8月27日最新力作，看看效果如何！.py,caochunxiao
+2025-08-30,日内流动性弹性因子，IC略低，但是分层回测结果竟然还不错！,volume,yes,minute_unspecified,high|low|open|volume,,13,,标准差,研报 / 成交量 / 流动性 / 5分钟 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]    
+    date_str = file_name.split('.')[0]    
+    # 加载当日分钟数据    
+    full_path = os.path.join(self.file_pth, file_name)    
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'high', 'low', 'open'])    
+    vol = data.to_dataframe('volume')    
+    vol_last_5min = vol.rolling(5).mean().shift(1)    
+    flag = vol > 2 * vol_last_5min    
+    amp = (data.to_dataframe('high') - data.to_dataframe('low')) / data.to_dataframe('open')    
+    res = 1 - (amp * np.where(flag, 1, np.nan)).mean() / (amp * np.where(flag, np.nan, 1)).mean()    
+    res = (res - res.mean()).abs()    
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)    
+    return res",2025-08-30_日内流动性弹性因子，IC略低，但是分层回测结果竟然还不错！.py,caochunxiao
+2025-09-19,邪修！将期货因子用在股票上，会产生什么样的火花？,volume,yes,minute_unspecified,close,,26,,如此看来，这次的邪修也并不是很成功。,邪修 / 研报 / 成交量,"def cal_factors(self, close, flag):
+    idx = []
+    for i in range(len(flag)):
+        if flag.iloc[i]:
+            idx.append(i)
+        if len(idx) == 2:
+            break
+    if len(idx) < 2:
+        return np.nan
+    intraday_mom = close.iloc[idx[-1]] / close.iloc[idx[0]] - 1
+    return intraday_mom",2025-09-19_邪修！将期货因子用在股票上，会产生什么样的火花？.py,general
+2025-09-20,日内极值反转，这次的邪修提升了因子的IC值！,reversal,yes,minute_unspecified,close,,32,,,邪修 / 反转 / 收益率 / 日内,"def cal_factors(close, max_flag, min_flag):
+    flag = pd.concat([max_flag, min_flag], axis=1)
+    flag = flag.replace(False, np.nan)
+    flag.reset_index(inplace=True, drop=True)
+    flag = flag.dropna(how='all')
+    if len(flag) == 0:
+        return np.nan
+    start = flag.iloc[[0]].index.tolist()[0]
+    if flag.iloc[0, 0]:
+        tmp_flag = flag.iloc[:, 1].dropna()
+    else:
+        tmp_flag = flag.iloc[:, 0].dropna()
+    if len(tmp_flag) == 0:
+        return np.nan
+    end = tmp_flag.iloc[[-1]].index.tolist()[0]
+    intraday_mom = close.iloc[start] / close.iloc[end] - 1
+    return intraday_mom",2025-09-20_日内极值反转，这次的邪修提升了因子的IC值！.py,general
+2025-09-21,基于日常收益的注意力溢出，一个IC和分层回测俱佳的因子！,event_driven,yes,1day,close|market_cap|sw_l1_code,joblib,39,,,邪修 / 研报 / 收益率 / 异常 / 日频,"def __cal_factors__(group):
+    group.sort_values(by='cap', inplace=True)
+
+    start = 0
+    res = []
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        res.append(tmp_group['attn'] - tmp_group['attn'].mean())
+        start = end
+    res = pd.concat(res)
+    return res",2025-09-21_基于日常收益的注意力溢出，一个IC和分层回测俱佳的因子！.py,chenshengrui
+2025-09-21,用行业和市值计算的注意力溢出，相比注意力的提升居然在这里！,event_driven,none,no_code,,,0,,无市值,异常,,2025-09-21_用行业和市值计算的注意力溢出，相比注意力的提升居然在这里！.py,chenshengrui
+2025-09-28,基于日常换手率的注意力溢出，效果会让人大吃一惊！,turnover,partial,unclear,turnover_ratio,,3,,,研报 / 换手率 / 收益率,"data = BaseDataLoader.load_data('../../data/capital.parquet', fields=['turnover_ratio'],
+                                codes=codes, start=start, lag=31).to_dataframes()
+rtn= data['turnover_ratio']",2025-09-28_基于日常换手率的注意力溢出，效果会让人大吃一惊！.py,chenshengrui
+2025-10-02,2019年的基于日频收益率的因子，居然可以这么复杂！,other,yes,unclear,,,25,,,研报 / 复杂 / 收益率 / 日频,"def process_single_day(self, idx):
+    ret = self.ret.iloc[idx - 120:idx].dropna(how='all', axis=1)
+    ret = ret.dropna(thresh=20, axis=1)
+    ret = ret.loc[:, [col for col in ret.columns if (ret[col] != 0).sum() >= 20]]
+    corr = ret.corr()
+    day = ret.iloc[[-1]].index.tolist()[0]
+    res = []
+    for code in corr.columns:
+        res.append(self.__process_single_day__(corr[code], ret, code))
+    res = pd.DataFrame(data=res, index=corr.columns.tolist(),
+                       columns=['ratio_20', 'ratio_120', '20_div_120', 'std_21'])
+    res['datetime'] = day
+    return res",2025-10-02_2019年的基于日频收益率的因子，居然可以这么复杂！.py,general
+2025-10-10,邪修！用二八定律改写MAX因子，竟然得到了一个每年IC绝对值都超过0.08的因子,other,yes,60min_inferred,close,,18,,,邪修 / 改进 / 改写 / 复杂 / 收益率,"def process_single_day(self, idx):
+    if idx < 21:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    price = []
+    for i in range(idx-21,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['close'])
+        price.append(data.to_dataframe('close'))
+    price = pd.concat(price)
+    rtn = price.pct_change()
+    rtn = rtn.iloc[48:]
+    thd = rtn.quantile(0.8)
+    rtn = (rtn * (rtn >= thd)).mean()
+    rtn.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return rtn",2025-10-10_邪修！用二八定律改写MAX因子，竟然得到了一个每年IC绝对值都超过0.08的因子.py,general
+2025-10-11,一个用日频数据计算出来非常垃圾的因子，换成1分钟数据居然有种起死回生的感觉！,event_driven,yes,1min_inferred,close|open,,10,,,收益率 / 异常 / 1分钟 / 日频 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    gap = data.to_dataframe('open') / data.to_dataframe('close').shift(1) - 1
+    res = ((rtn > 0) * (gap > 0)).mean()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-10-11_一个用日频数据计算出来非常垃圾的因子，换成1分钟数据居然有种起死回生的感觉！.py,general
+2025-10-12,三步复杂操作改进反向日内逆转的频率，效果会如何呢？,volume,yes,1day,close|volume,joblib,35,,,研报 / 改进 / 复杂 / 成交量 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume'])
+    close = data.to_dataframe('close').iloc[0]
+    vol = data.to_dataframe('volume')
+    vol = vol.iloc[1:].sum() / vol.sum()
+    res = pd.concat([close, vol], axis=1)
+    res.columns = ['close', 'ivr']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-10-12_三步复杂操作改进反向日内逆转的频率，效果会如何呢？.py,general
+2025-10-18,日频数据上表现好的因子，移植到分钟的数据上会不会更好呢？,other,yes,60min_inferred,close|open,,21,,从分层回测来看，虽然这个因子的IC并不是太高，但是这分层回测的效果可以说是比想象中的要好一些了。至少，没有五条净值曲线扭成一团麻花分不清彼此。,收益率 / 日频,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    idx = pd.to_datetime(date_str) + timedelta(hours=15)
+    if idx < self.start or idx > self.end:
+        return pd.DataFrame({})
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, codes=self.codes, fields=['close', 'open'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    ind_data = self.ind_data.loc[idx]
+    cap_data = self.cap.loc[idx]
+    res = []
+    for i in range(len(rtn)):
+        df = pd.concat([rtn.iloc[i], ind_data, cap_data], axis=1)
+        df.columns = ['rtn', 'ind', 'cap']
+        res.append(df.groupby('ind', as_index=False, group_keys=False).apply(self.__cal_factors__))
+    res = pd.concat(res, axis=1).T
+    res = np.square(res)
+    res = res.mean()
+    res.name = idx
+    return res",2025-10-18_日频数据上表现好的因子，移植到分钟的数据上会不会更好呢？.py,general
+2025-10-18,邪修！又一个每年IC都超过0.08的因子！,other,yes,1day,close|market_cap|sw_l1_code,joblib,40,,如果不乘上复权因子的话，那么这个因子的分层回测曲线是下面这样的。,邪修 / 研报 / 收益率,"def __cal_factors__(group):
+    group.sort_values(by='cap', inplace=True)
+    start = 0
+    res = []
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        res.append((tmp_group['ret'] - tmp_group['ret'].mean()) / tmp_group['ret'].std())
+        start = end
+    res = pd.concat(res)
+    return res",2025-10-18_邪修！又一个每年IC都超过0.08的因子！.py,general
+2025-10-19,“新瓶装旧酒”，一个考虑了成交量的收益反转因子，表现会怎么样呢？,volume,yes,minute_unspecified,close|open|volume,,16,,从分层回测来看，这又是一个空头银因子。因子值最大的一组的收益率远低于其他四组。,研报 / 成交量 / 反转 / 动量 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume']).to_dataframes()
+    rtn = (data['close'] / data['open'] - 1).iloc[:235]
+    vol = data['volume'].iloc[:235]
+    vol_flag = vol > vol.mean() + vol.std()
+    flag_pos = rtn > 0
+    flag_neg = rtn < 0
+    reverse_imp_pos = -1 * (rtn * np.where(vol_flag * flag_pos != 0, 1.0, np.nan)).mean()
+    reverse_imp_neg = (rtn * np.where(vol_flag * flag_neg != 0, 1.0, np.nan)).mean()
+    res = pd.concat([reverse_imp_pos, reverse_imp_neg, rtn.mean()], axis=1)
+    res.columns = ['reverse_imp_pos', 'reverse_imp_neg', 'rtn']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-10-19_“新瓶装旧酒”，一个考虑了成交量的收益反转因子，表现会怎么样呢？.py,general
+2025-10-20,放量时刻的波动率因子，IC大幅提升！因子数量直接翻倍！,volatility,none,no_code,,,0,,从分层回测的曲线来看，这又是一个空头因子，而且只管上感觉这个空头因子和其他的空头因子看起来并没有什么太大的差异。至少，从净值曲线的趋势来看，几乎是一模一样的，或者说用肉眼是无法看出差异的。,研报 / 成交量 / 波动率 / 反转 / 5分钟,,2025-10-20_放量时刻的波动率因子，IC大幅提升！因子数量直接翻倍！.py,general
+2025-10-21,一个直观上感觉离谱的因子，稍微改造一下居然每年的IC绝对值都超过了0.08！,other,yes,1day,close|factor|volume,sklearn.LinearRegression|tqdm,29,,虽然，这个因子在IC上的表现是不错的（每一年的IC绝对值都超过了0.08，其中有三年的IC绝对值甚至超过了0.1），但是其在分层回测上的表现有点一般。因子值最大的一组收益率最低，而因子值最小的一组收益率却不是最高的。,研报,"def process_single_day(self, idx):
+    rtn = self.rtn.iloc[idx].dropna()
+    rtn.sort_index(inplace=True)
+    x = [rtn.iloc[:10].mean()] * 5
+    for i in range(5, len(rtn) - 5):
+        x.append(rtn.iloc[i-4:i+6].mean())
+    x += [rtn.iloc[-10:].mean()] * 5
+    x = np.array(x).reshape(-1, 1)
+    y = rtn.values.reshape(-1, 1)
+    lr = LinearRegression()
+    lr.fit(x, y)
+    resi = y - lr.predict(x)
+    return pd.Series(resi.reshape(-1), index=rtn.index.tolist())",2025-10-21_一个直观上感觉离谱的因子，稍微改造一下居然每年的IC绝对值都超过了0.08！.py,general
+2025-10-25,买卖压力度量，复权调整成交量之后，效果居然能有提升！,volume,yes,1day,factor|volume|vwap,tqdm,21,从IC上来看，这个因子的表现中规中矩，IC绝对值不算高也不能说低。,,研报 / 复杂 / 成交量 / 买卖压力,"def cal_factor(self, idx):
+    vwap = self.vwap.iloc[idx-21:idx]
+    day = vwap.iloc[[-1]].index.tolist()[0]
+    vol = self.vol.iloc[idx-21:idx]
+    vol = vol.div(vol.mean(), axis=1)
+    res = np.log(vwap.mean() / (vwap * vol).sum())
+    res.name = day
+    return res",2025-10-25_买卖压力度量，复权调整成交量之后，效果居然能有提升！.py,general
+2025-10-27,神奇的魔法！行业、市值和相关性能让分层回测显著提升？,other,yes,1day,close|factor|market_cap|sw_l1_code|volume,joblib|sklearn.LinearRegression,64,从IC上来看，这个改进对它的影响不大。,收益分析的第一张图是考虑了相关性的，第二张图是不考虑相关性的。,复杂 / 相关性 / 日频,"def __cal_factors__(group):
+    group.sort_values(by='cap', inplace=True)
+    start = 0
+    res = []
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        cols = tmp_group.index.tolist()
+        tmp_rtn = tmp_group['rtn'].values.reshape(-1, 1)
+        weights = tmp_group[cols]
+        weights = weights.div(weights.sum(), axis=1)
+        tmp = np.nansum(tmp_rtn * weights, axis=0)
+        res += list(tmp)
+        start = end
+    res = pd.Series(data=res, index=group.index.tolist())
+    return res",2025-10-27_神奇的魔法！行业、市值和相关性能让分层回测显著提升？.py,general
+2025-10-29,邪修！聪明钱因子3.0版本，IC和分层回测全方面的提升！,smart_money,yes,minute_unspecified,volume,,34,虽然，IC超过0.08的年份数量一样，但是整体来说，这个因子的IC值略微高一点点。前三年的超过了0.09，2023年的超过了0.12，这都是比之前高的。,此外，从分层回测来看，这个3.0版本的因子表现也是更好的。,邪修 / 研报 / 改进 / 聪明钱,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    vol = []
+    fields = ['volume']
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        if i == idx:
+            fields.append('turnover')
+        data = BaseDataLoader.load_data(full_path, fields=fields)
+        vol.append(data.to_dataframe('volume'))
+    flag = self.z_score(vol)
+    codes = flag.columns.tolist()
+    cur_vol = vol[-1].reindex(columns=codes)
+    amt = data.to_dataframe('turnover').reindex(columns=codes)
+    vwap_large_vol = (amt * np.where(flag, 1, np.nan)).sum() / (cur_vol * np.where(flag, 1, np.nan)).sum()
+    vwap_small_vol = (amt * np.where(flag, np.nan, 1)).sum() / (cur_vol * np.where(flag, np.nan, 1)).sum()
+    res = vwap_large_vol / vwap_small_vol
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-10-29_邪修！聪明钱因子3.0版本，IC和分层回测全方面的提升！.py,general
+2025-10-31,成交额占比熵2.0版本，IC和分层回测都有提升，但仍不够！,smart_money,yes,minute_unspecified,close|turnover,,29,IC方面有比原始因子好的地方，2023年的IC绝对值接近0.1了（如果是第一种尝试得到的因子的话，这一年超过了0.1），原始因子最大的一年也没有超过0.07。,分层回测方面，相交的情况较多，而且在2023年之前一致时因子值最大的两组表现更好，到了2023年之后才是因子值最小的两组表现更好。,研报 / 成交量 / 聪明钱,"def cal_factors(data):
+    data = data.groupby('close').sum()
+    data.sort_index(inplace=True)
+    tot_money = data['turnover'].sum()
+    start = 0
+    res = 0
+    for q in [0.3, 0.7, 1]:
+        end = int(len(data) * q)
+        tmp_group = data.iloc[start:end]
+        tmp_group = tmp_group['turnover'].sum() / tot_vol
+        res -= tmp_group * np.log(tmp_group)
+        start = end
+    vol_ratio = data['turnover'] / tot_vol
+    vol_ratio = -vol_ratio * np.log(vol_ratio)
+    return [res, vol_ratio.sum()]",2025-10-31_成交额占比熵2.0版本，IC和分层回测都有提升，但仍不够！.py,general
+2025-11-02,邪修！直到走火入魔，终于弄出来一个稍微能看的因子！,other,yes,minute_unspecified,turnover|volume,,33,如果是用均值合成的，IC为正（这与相关性分析一致，因为2.0版本和3.0版本的IC都是负的）。其中，2023年的IC超过了0.1，超过0.08的年份有2018年和2021年。,其实，这个分层回测的结果并不是很完美。毕竟，因子值处于中间三组的净值曲线交织在了一起，很难区分。,邪修 / 自相关 / 相关性 / 差分,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    amt = []
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['turnover', 'volume'])
+        amt.append(data.to_dataframe('turnover'))
+        vol.append(data.to_dataframe('volume'))
+    amt = self.z_score(amt)
+    vol = self.z_score(vol)
+    res = []
+    for i in range(len(amt.columns.tolist())):
+        tmp_res = []
+        tmp_amt = amt.iloc[:, i]
+        tmp_vol = vol.iloc[:, i]
+        if np.all(tmp_amt == 1) or np.all(tmp_amt == 0):
+            tmp_res.append(1)
+        else:
+            tmp_res.append(tmp_amt.corr(tmp_amt.shift(1)))
+        if np.all(tmp_vol == 1) or np.all(tmp_vol == 0):
+            tmp_res.append(1)
+        else:
+            tmp_res.append(tmp_vol.corr(tmp_vol.shift(1)))
+        tmp_res.append(tmp_res[0] - tmp_res[-1])
+        res.append(tmp_res)
+    res = pd.DataFrame(res, index=amt.columns.tolist(), columns=['amt', 'vol', 'diff'])
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-11-02_邪修！直到走火入魔，终于弄出来一个稍微能看的因子！.py,general
+2025-11-05,峰岭成交比因子，IC和分层回测都表现不错！,volume,yes,minute_unspecified,turnover|volume,,20,从IC上的表现来看，这个因子还是不错的，有两年的IC超过了0.1，除了2024年外其他年份的IC都超过了0.08。,分层回测的话就有一点点遗憾了，group\_2的收益率超过了group\_3。不过，多空收益还是不错的。,研报 / 成交量,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    vol = []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+        vol.append(data.to_dataframe('volume'))
+    flag = self.cal_flag(vol)
+    money = data.to_dataframe('turnover').reindex(columns=flag.columns.tolist())
+    money_valley = (cur_vol * np.where(flag == 0, 1, np.nan)).sum()
+    money_peak = (cur_vol * np.where(flag == 1, 1, np.nan)).sum()
+    money_ridge = (cur_vol * np.where(flag == 2, 1, np.nan)).sum()
+    res = pd.concat([vol_valley, vol_peak, vol_ridge], axis=1)
+    res.columns = ['valley', 'peak', 'ridge']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-11-05_峰岭成交比因子，IC和分层回测都表现不错！.py,weijianrong
+2025-11-08,差分标准差，意外发现的一个IC还挺高的因子！,volume,yes,minute_unspecified,turnover|volume,,17,,这个收益分析是差分标准差因子的。这个分层回测的结果可以说是非常差了。虽然，它因子值最大的一组收益远低于其他四组，看起来是一个空头因子。但是，它的多空收益并不是很显著。比起之前复现的一些空头因子来说，它没有任何优势。,邪修 / 研报 / 成交量 / 相关性 / 差分,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover'])
+    date_str = file_name.split('.')[0]
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    vol = vol.div(vol.sum(), axis=1)
+    money = money.div(money.sum(), axis=1)
+    diff = vol - money
+    corr = diff.corrwith(diff.shift(1))
+    res = [diff.std(), diff.skew(), diff.kurt(), corr]
+    res = pd.concat(res, axis=1)
+    res.columns = ['std', 'skew', 'kurt', 'corr']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2025-11-08_差分标准差，意外发现的一个IC还挺高的因子！.py,general
+2025-11-11,支撑阻力空间因子，一个自创的且IC不错的因子！,volume,yes,unclear,,,10,这个因子从IC上的表现来看还是不错的，除了2024年外，其他年份的绝对值都超过了0.08，其中还有两年超过了0.1，最高的一年则到达了0.14。,但是，到了分层回测这里就比较一般了。因子值最大的一组收益率最低，但是因子值第二大的一组却是收益率最高的。,研报 / 成交量,"def cal_factors(data):
+    data = data.groupby('close').sum()
+    if len(data) < 4:
+        return np.nan
+    data.reset_index(inplace=True)
+    flag = data['close'] > data['close'].mean()
+    vol_up = (data['volume'] * np.where(flag, 1, np.nan)).idxmax()
+    vol_down = (data['volume'] * np.where(flag, np.nan, 1)).idxmax()
+    return data.loc[vol_down]['close'] / data.iloc[vol_up]['close'] - 1",2025-11-11_支撑阻力空间因子，一个自创的且IC不错的因子！.py,general
+2025-11-14,怕自己邪修走火入魔，找了老外论文里的因子复现，结果让人大吃一惊！,other,yes,unclear,,,10,这个IC可以说是非常一般了，最高的一年也才超过了0.04。,无论是IC还是分层回测，这个因子的表现都很一般，特别是分层回测都可以用差来形容了。分了五组，结果这五组之间基本上没有太大的区分度，看起来就是一团麻花。,邪修 / 研报 / 改进 / 流动性,"def cal_factor(self, idx):
+    rtn = self.rtn.iloc[idx-21:idx]
+    day = rtn.iloc[[-1]].index.tolist()[0]
+    rtn_mkt = rtn.mean(axis=1)
+    w = abs(rtn.sub(rtn_mkt, axis=0)) / (rtn.abs().add(rtn_mkt.abs(), axis=0) + 0.1)
+    w = w.rank(axis=1, ascending=False)
+    w = w.div(w.mean(), axis=1)
+    res = w.corrwith(rtn)
+    res.name = day
+    return res",2025-11-14_怕自己邪修走火入魔，找了老外论文里的因子复现，结果让人大吃一惊！.py,general
+2025-11-15,学术论文中的五大波动率因子，一篇文章给你讲完！,volatility,yes,1day,close|high|low|open|turnover,,33,关于IC，笔者想说一点。,分层回测前半段的表现可以说是很差了，在2022年之前，这五组之间可以说是毫无区分度。,研报 / 改进 / 波动率 / 流动性,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet',
+                                         fields=['high', 'low', 'close', 'open', 'turnover']).to_dataframes()
+    sigma_normal = data['close'].pct_change().rolling(21).std()
+    hl_ratio = data['high'] / data['low']
+    co_ratio = data['close'] / data['open']
+    hc_ratio = data['high'] / data['close']
+    ho_ratio = data['high'] / data['open']
+    lc_ratio = data['low'] / data['close']
+    lo_ratio = data['low'] / data['open']
+    sigma_p = np.sqrt((np.square(np.log(hl_ratio))).rolling(21).sum() / (84*np.log(2)))
+    sigma_gk = np.sqrt((0.5 * np.square(np.log(hl_ratio)) -
+                          (2 * np.log(2) - 1) * np.square(np.log(co_ratio))).rolling(21).mean())
+    sigma_rs = (np.log(hc_ratio) * np.log(ho_ratio) +
+                        np.log(lc_ratio) * np.log(lo_ratio)).rolling(21).mean()
+    sigma_o = (np.log(data['open'] / data['close'].shift(1))).rolling(21).mean()
+    sigma_c = (np.log(data['close'] / data['open'].shift(1))).rolling(21).mean()
+    k = 0.34 / (1.34 + 22 / 20)
+    sigma_yz = np.sqrt(sigma_o + k * sigma_rs + (1 - k) * sigma_c)
+    sigma_rs = np.sqrt(sigma_rs)
+    delta = np.log(9/8)
+    delta_close = (data['close'].diff()).rolling(21).mean()
+    mu = delta_close / (2 * delta)
+    tao = delta_close / 21
+    sigma_cf = np.sqrt(2 * mu * delta / (np.log(delta + mu * tao) - np.log(tao - mu * tao)))
+    dfs = {'sigma_normal': sigma_normal, 'sigma_p': sigma_p, 's...",2025-11-15_学术论文中的五大波动率因子，一篇文章给你讲完！.py,chenshengrui
+2025-11-16,ROLL价差因子，八种价差因子种计算最简单的，效果会怎么样？,volatility,yes,1day,close,joblib,35,日频数据计算的因子，IC绝对值超过0.05的有五年。,如果是标准差合成的分钟因子，那么红色的线将是最终净值最高的。它的结果就是下面的这张图。,研报 / 复杂 / 波动率 / 流动性,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'])
+    delta_close = (np.log(data.to_dataframe('close'))).diff()
+    delta_close_shift = delta_close.shift()
+    res = []
+    for i in range(len(delta_close.columns)):
+        res.append(max(-4 * delta_close.iloc[:, i].cov(delta_close_shift.iloc[:, i]), 0))
+    res = pd.Series(data=np.sqrt(res), index=delta_close.columns.tolist(),
+                    name=pd.to_datetime(date_str) + timedelta(hours=15))
+    return res",2025-11-16_ROLL价差因子，八种价差因子种计算最简单的，效果会怎么样？.py,chenshengrui
+2025-11-19,CS价差因子，计算好像更简单，多空收益直接爆炸！,other,yes,minute_unspecified,high|low,,15,对了，闲话还得继续说。,笔者说这个因子的分层回测表现更好，但是它好在哪里呢？,复杂,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['high', 'low'])
+    high = data.to_dataframe('high')
+    low = data.to_dataframe('low')
+    beta = np.power(np.log(high / low), 2).rolling(2).mean()
+    gamma = np.power(np.log(high.rolling(2).max() / low.rolling(2).min()), 2)
+    num = 3 - 2 * np.sqrt(2)
+    alpha = (np.sqrt(2 * beta) - np.sqrt(beta)) / num - np.sqrt(gamma / num)
+    res = (2 * np.exp(alpha - 1)) / (1 + np.exp(alpha))
+    res = res.mean()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-11-19_CS价差因子，计算好像更简单，多空收益直接爆炸！.py,chenshengrui
+2025-11-24,邪修！都研究出这样了，波动率居然还能整出新东西！,volatility,yes,unclear,,,9,用均值合成的因子有三年的IC绝对值超过了0.08，而用标准差合成的只有2023年一年的IC绝对值超过了0.08。,这个因子和其他的波动率因子相比，它的优势并不是在IC上，而是在分层回测上面。毕竟，它因子值最小的一组收益率最高，而因子值最大的一组收益率最低。,邪修 / 成交量 / 波动率,"def cal_factors(data):
+    data = data.groupby('close').sum()
+    if len(data) < 5:
+        return np.nan
+    data['vwap'] = data['turnover'] / data['volume']
+    data['vwap'] = data['vwap'] / data['close'] - 1
+    std_vwap = data['vwap'].std()
+    return std_vwap",2025-11-24_邪修！都研究出这样了，波动率居然还能整出新东西！.py,general
+2025-11-26,AR价差，死了一个脑细胞后，可以整出来快242个因子？还有因子连续六年IC绝对值超0.1！,other,yes,minute_unspecified,close|high|low,,22,从IC上来看，这个因子确实不错。,,,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['high', 'low', 'close'])
+    high = data.to_dataframe('high')
+    low = data.to_dataframe('low')
+    close = np.log(data.to_dataframe('close').shift(1))
+    mid = np.log((high + low) / 2)
+    data = (close - mid.shift(1)) * (close - mid)
+    factor1 = np.sqrt(((-4 * data).clip(lower=0)).mean())
+    factor2 = np.sqrt((-4 * data.mean()).clip(lower=0))
+    res = [factor1, factor2]
+    cols = []
+    for i in [5, 15, 30, 60]:
+        res.append(np.sqrt((-4 * data.rolling(i).mean()).clip(lower=0).mean()))
+        cols.append('hf_ar_{}'.format(i))
+    res = pd.concat(res, axis=1)
+    res.columns = ['hf_ar', 'hf_ar_240'] + cols
+    res['datetime'] = cur
+    return res",2025-11-26_AR价差，死了一个脑细胞后，可以整出来快242个因子？还有因子连续六年IC绝对值超0.1！.py,chenshengrui
+2025-12-01,老外的凸显理论水土不服，但稍微改进一下IC就能大幅提升！,turnover,yes,1day,close|factor|turnover_ratio,tqdm,24,改进前的IC绝对值没有一年超过0.05，改进之后每一年都超过了0.05，甚至还有四年超过了0.08，这个提升可以说是相当大了。,原始因子的分层回测可以说是五组净值曲线拧成了一团麻，而改进后的因子，至少因子值最小的那一组和其他四组从2019年开始就没有相交了。,邪修 / 研报 / 改进 / 换手率 / 收益率,"def cal_factor(self, idx):
+    rtn = self.rtn.iloc[idx-21:idx]
+    tr = self.tr.iloc[idx-21:idx]
+    day = rtn.iloc[[-1]].index.tolist()[0]
+    tr_mkt = tr.mean(axis=1)
+    w = abs(tr.sub(tr_mkt, axis=0)) / (tr.abs().add(tr_mkt.abs(), axis=0) + 0.1)
+    w = w.rank(axis=1, ascending=False)
+    w = w.div(w.mean(), axis=1)
+    res = pd.concat([w.corrwith(rtn), w.corrwith(tr)], axis=1)
+    res.columns = ['stv_1', 'stv_2']
+    res['datetime'] = day
+    return res",2025-12-01_老外的凸显理论水土不服，但稍微改进一下IC就能大幅提升！.py,chenshengrui
+2025-12-03,邪修！换手率替换收益率，方法论一出，因子多到写不完！,turnover,yes,1day,close|turnover_ratio,,27,用均值合成的fear\_tr\_tr和fear\_tr\_std这两个因子，有六年IC绝对值超过了0.08，其中有三年更是超过了0.1。,这个分层回测的表现挺一般的，但是和其他几个比起来还是要好的。,邪修 / 研报 / 改进 / 换手率 / 收益率,"def __call__(self):
+    sigma = self.run()
+    sigma = pd.concat(sigma, axis=1).T
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close']
+                                    ).to_dataframe('close')
+    rtn = data.pct_change()
+    mkt_ret = rtn.mean(axis=1).values.reshape(-1, 1)
+    fear = np.abs(rtn - mkt_ret) / (rtn.abs().values + np.abs(mkt_ret) + 0.1)
+    dfs = {'fear_rtn_rtn': fear * rtn, 'fear_rtn_std': fear * rtn * sigma}
+    data = BaseDataLoader.load_data('../../data/capital.parquet', fields=['turnover_ratio']
+                                    ).to_dataframe('turnover_ratio')
+    mkt_tr = data.mean(axis=1).values.reshape(-1, 1)
+    fear_tr = np.abs(data - mkt_tr) / (data.abs() + np.abs(mkt_tr) + 0.1)
+    dfs['fear_tr_rtn'] = fear_tr * rtn
+    dfs['fear_tr_rtn_std'] = fear_tr * rtn * sigma
+    dfs['fear_tr_tr'] = fear_tr * data
+    dfs['fear_tr_std'] = fear_tr * data * sigma
+    rtn_tr_corr = []
+    for i in range(21, len(fear) + 1):
+        tmp_fear = fear.iloc[i-21:i]
+        tmp_fear_tr = fear_tr.iloc[i-21:i]
+        rtn_tr_corr.append(tmp_fear.corrwith(tmp_fear_tr))
+    rtn_tr_corr = pd.concat(rtn_tr_corr, axis=1).T
+    rtn_tr_corr.index = fear.index.tolist()[20:]
+    dfs['rtn_tr_corr'] = rtn_tr_corr
+    df = dfs_to_df(dfs)
+    df.to_parquet('./{}.parquet'.format(self.name))",2025-12-03_邪修！换手率替换收益率，方法论一出，因子多到写不完！.py,general
+2025-12-09,用换手率来计算非流动性，来自绿皮书作者的另一本书，在大A会有怎样的表现呢？,turnover,yes,1day,close|market_cap|turnover|turnover_ratio|volume,,11,看起来IC还是可以的，居然有四年超过了0.08。,虽然这个因子的IC还是不错的，但是分层回测看起来就有点一般了。因为，它的单调性不是很好。,研报 / 成交量 / 换手率 / 收益率 / 非流动性,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close', 'volume', 'turnover'])
+    cap = BaseDataLoader.load_data('../../data/capital.parquet', fields=['market_cap', 'turnover_ratio'])
+    rtn = np.abs(data.to_dataframe('close').pct_change())
+    illiquidity_vol = rtn / data.to_dataframe('volume')
+    illiquidity_money = rtn / data.to_dataframe('turnover')
+    illiquidity_tr = rtn / cap.to_dataframe('turnover_ratio')
+    dfs = {'illiquidity_vol': illiquidity_vol, 'illiquidity_tr': illiquidity_tr,
+           'illiquidity_money': illiquidity_money, 'market_cap': cap.to_dataframe('market_cap')}
+    df = dfs_to_df(dfs)
+    df.to_parquet('./illiquidity.parquet')",2025-12-09_用换手率来计算非流动性，来自绿皮书作者的另一本书，在大A会有怎样的表现呢？.py,general
+2025-12-11,用神奇的魔法优化最大异常日收益率，神奇依旧存在吗？,event_driven,yes,1day,close|factor|group_abnormal_rtn|market_cap|sw_l1_code,joblib,40,,只看这个分层回测结果，肯定会有人说，它依旧不是很好。,收益率 / 异常,"def __cal_factors__(group):
+    group.sort_values(by='cap', inplace=True)
+    start = 0
+    res = []
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        res.append(np.abs(tmp_group['rtn'] - tmp_group['rtn'].mean()))
+        start = end
+    res = pd.concat(res)
+    return res",2025-12-11_用神奇的魔法优化最大异常日收益率，神奇依旧存在吗？.py,general
+2025-12-13,分布估计下的主动买入占比，桃子姐的因子居然在这本书中提到过！,other,yes,minute_unspecified,close|turnover,,37,这个IC确实表现不好，有三年低于0.01，还有两年也就刚刚超过了0.01，最高的一年都没能超过0.035。,不过，从分层回测来看却是一个看起来还行的因子。,研报 / 日频,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['turnover', 'close'])
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    factor = self.factor.loc[cur]
+    factor = factor.reindex(data.codes)
+    money = data.to_dataframe('turnover')
+    tot_money = money.sum()
+    close = data.to_dataframe('close') * factor.values.reshape(1, -1)
+    if self.last_close is not None:
+        close = pd.concat([self.last_close, close])
+        self.last_close = close.iloc[[-1]]
+    rtn = close.pct_change()
+    sigma = rtn.std()
+    naive = (money * np.where(rtn > 0, 1.0, np.nan)).sum() / tot_money
+    
+    t_pdf = []
+    for col in rtn.columns:
+        t_pdf.append(t.cdf(rtn[col] / sigma[col], 240))
+    t_pdf = np.array(t_pdf).T
+    t_pdf = (money * t_pdf).sum() / tot_money
+    
+    norm_pdf = []
+    confidence_norm_pdf = []
+    for col in rtn.columns:
+        norm_pdf.append(norm.cdf(rtn[col] / sigma[col], 0, 1))
+        confidence_norm_pdf.append(norm.cdf(rtn[col] / 0.1 * 1.96, 0, 1))
+    norm_pdf = np.array(norm_pdf).T
+    confidence_norm_pdf = np.array(confidence_norm_pdf).T
+    norm_pdf = (money * norm_pdf).sum() / tot_money
+    confidence_norm_pdf = (money * confidence_norm_pdf).sum() / tot_money
+    
+    uniform_pdf = np.clip((rtn + 0.1) / 0.2, 0, 1)
+    uniform_pdf = (money * uniform_pdf).sum() / to...",2025-12-13_分布估计下的主动买入占比，桃子姐的因子居然在这本书中提到过！.py,general
+2025-12-17,滴水石穿，金工诗人曹春晓老师最新力作，6年IC超0.1，其中3年IC超0.12！,volume,yes,3min_inferred,volume,,22,这个IC的表现确实让人大吃一惊，如果不是2024年有点拖后腿的话，那就更加完美了。,这个分层回测结果在前半段的表现一般，因子值较大的四组之间相交的现象很严重。但是，到最后的净值居然是完美单调的。,研报 / 成交量 / 日内,"def cal_factors(vol):
+    q = vol.quantile([0.25, 0.75])
+    med = q.median()
+    iqr = q.iloc[-1] - q.iloc[0]
+    vol = vol.clip(lower=med-3*iqr, upper=med+3*iqr)
+    vol = vol - vol.mean()
+    vol = vol * np.hanning(len(vol))
+    fft_cf = np.fft.rfft(vol)
+    p_f = np.square(np.abs(fft_cf))
+    return np.sum(p_f[48:]) / np.sum(p_f[1:])",2025-12-17_滴水石穿，金工诗人曹春晓老师最新力作，6年IC超0.1，其中3年IC超0.12！.py,caochunxiao
+2025-12-18,Edge价差因子，最后一个也是最复杂的价差因子，效果能提升吗？,volatility,yes,minute_unspecified,close|high|low|open,,27,第一年的IC绝对值非常低了，换成其他三种方式得到的因子，这一年的IC为正。,这个分层回测如果是从2020年开始的话，应该能展现出不错的单调性。这一点也能从其IC上看出来，在2018年的时候，这个因子基本上就是无效的。,研报 / 复杂 / 波动率 / 流动性,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['high', 'low', 'close', 'open'])
+    h = data.to_dataframe('high')
+    l = data.to_dataframe('low')
+    c = data.to_dataframe('close')
+    o = data.to_dataframe('open')
+    tao = 1 - (h == l) * (l == c.shift(1))
+    pi_o = ((o != h) * np.where(tao, 1, np.nan)).mean() + ((o != l) * np.where(tao, 1, np.nan)).mean()
+    pi_c = ((c.shift(1) != h.shift(1)) * np.where(tao, 1, np.nan)).mean() + (
+            (c.shift(1) != l.shift(1)) * np.where(tao, 1, np.nan)).mean()
+    pi_o = -8 / pi_o
+    pi_c = -8 /pi_c
+    mid = np.log((h + l) / 2)
+    o = np.log(o)
+    c = np.log(c)
+    ohl = ((mid - o) * (o - mid.shift(1))).mean() * pi_o
+    chl = ((mid - c.shift(1)) * (c.shift(1) - mid.shift(1))).mean() * pi_c
+    ohlc = ((mid - o) * (o - c.shift(1))).mean() * pi_o
+    chlo = ((o - c.shift(1)) * (c.shift(1) - mid.shift(1))).mean() * pi_c
+    res = pd.concat([ohl, chl, ohlc, chlo], axis=1)
+    res.columns = ['ohl', 'chl', 'ohlc', 'chlo']
+    res['datetime'] = cur
+    return res",2025-12-18_Edge价差因子，最后一个也是最复杂的价差因子，效果能提升吗？.py,chenshengrui
+2025-12-20,时间和，一个分层回测表现有点离谱的多头因子！,other,yes,minute_unspecified,close|open,,20,,这个因子从2022年第二季度开始，不同组之间的区分度大幅提升。,研报 / 复杂 / 收益率 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open']).to_dataframes()
+    rtn = (data['close'] / data['open'] - 1)
+    up_flag = rtn > 0
+    down_flag = rtn < 0
+    t_list = np.arange(1, 241).reshape(-1, 1)
+    gu = rtn * np.where(up_flag, 1, np.nan)
+    gu = (gu * t_list).sum() / gu.sum()
+    gd = rtn * np.where(down_flag, 1, np.nan)
+    gd = (gd * t_list).sum() / gd.abs().sum()
+    res = pd.concat([gu, gd], axis=1)
+    res.columns = ['gu', 'gd']
+    res = res.fillna(0)
+    res['diff'] = res['gd'] - res['gu']
+    res['dist'] = res['diff'].abs()
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2025-12-20_时间和，一个分层回测表现有点离谱的多头因子！.py,weijianrong
+2025-12-22,时间重心偏离，一个需要进行三次截面回归的因子！,other,yes,1day,close|gd|gu|open,sklearn.LinearRegression|tqdm,61,,这个分层回测的话，在2022年之前可以说是区分度不高。但是，到了2022年之后，各组之前的区分度还是不错的。,研报 / 收益率 / 日内,"def cal_residual(self, x):
+    y = x[:, -1].reshape(-1, 1)
+    x = x[:, :-1]
+    lr = LinearRegression()
+    lr.fit(x, y)
+    resi = y - lr.predict(x)
+    return resi.reshape(-1)",2025-12-22_时间重心偏离，一个需要进行三次截面回归的因子！.py,weijianrong
+2025-12-24,迭代次数从1000改到10还需要1505分钟计算的因子，会交出什么样的答卷？,reversal,yes,minute_unspecified,close|open,joblib,34,,需要注意的是研报中是采用指数移动平均来合成月度因子的，这里笔者偷懒使用的依旧是简单的等权平均。,研报 / 反转 / 5分钟,"def cal_factors(close):
+    emd = EMD(MAX_ITERATION=10)
+    imfs = emd(close, max_imf=3)
+    snr_layer2 = snr_layer3 = None
+    if len(imfs) == 4:
+        noise_layer3 = np.sum(imfs[:3, :], axis=0)
+        snr_layer3 = np.log(np.std(close - noise_layer3) / np.std(noise_layer3))
+        noise_layer2 = np.sum(imfs[:2, :], axis=0)
+        snr_layer2 = np.log(np.std(close - noise_layer2) / np.std(noise_layer2))
+    elif len(imfs) == 3:
+        noise_layer2 = np.sum(imfs[:2, :], axis=0)
+        snr_layer2 = np.log(np.std(close - noise_layer2) / np.std(noise_layer2))
+    return [snr_layer2, snr_layer3]",2025-12-24_迭代次数从1000改到10还需要1505分钟计算的因子，会交出什么样的答卷？.py,general
+2025-12-29,邪修！用截面回归改进金工诗人曹老师的模糊价差因子，分层回测炸裂提升！,volatility,yes,unclear,fuzz_money|fuzz_volume,sklearn.LinearRegression|tqdm,21,和原始的模糊价差因子相比，这个因子的IC提升也是挺大的，可以说是每年都高了一点点。,和原始因子相比，这个分层回测的提升真的是太大了，说是炸裂也不算夸张。,邪修 / 研报 / 改进 / 波动率,"def cal_factors(self, idx):
+    x = self.x.iloc[idx]
+    y = self.y.iloc[idx]
+    data = pd.concat([x, y], axis=1).dropna()
+    data.columns = ['x', 'y']
+    lr = LinearRegression()
+    lr.fit(data[['x']], data[['y']])
+    resi = data[['y']] - lr.predict(data[['x']])
+    resi.columns = [x.name]
+    return resi",2025-12-29_邪修！用截面回归改进金工诗人曹老师的模糊价差因子，分层回测炸裂提升！.py,general
+2025-12-31,量化+雷达算法！用IAA（迭代自适应）算法优化滴水石穿因子，分层回测单调性提升！,volume,yes,unclear,,,37,基本上每一年的IC都有所下降，但是2018年的IR是提升的。,这个分层回测结果，从多空收益来看是不如原始因子的。,研报 / 成交量 / 日内,"def cal_factors(vol):
+    q = vol.quantile([0.25, 0.75])
+    med = q.median()
+    iqr = q.iloc[-1] - q.iloc[0]
+    vol = vol.clip(lower=med-3*iqr, upper=med+3*iqr)
+    vol = vol - vol.mean()
+    vol = vol * np.hanning(len(vol))
+    fft_cf = np.fft.rfft(vol)
+    p_f = np.square(np.abs(fft_cf))
+    power_ratio = np.sum(p_f[48:]) / np.sum(p_f[1:])
+    vol = vol.values
+    target_freqs = np.linspace(0.0, 0.5, 120)
+    M = len(target_freqs)
+    n = np.arange(240).reshape(-1, 1)
+    # 构建傅里叶字典
+    A = np.exp(1j * 2 * np.pi * n @ target_freqs.reshape(1, -1))
+    # 初始化功率（周期图）
+    P = np.abs(A.conj().T @ vol.reshape(-1, 1)).flatten() ** 2 / 240
+    P = np.maximum(P, 1e-10)
+    for iter_idx in range(5):
+        P_symmetric = np.concatenate([P, P[-2:0:-1]])
+        r = ifft(P_symmetric).real[:240] * len(P_symmetric)
+        # 更新功率
+        for k in range(M):
+            a_k = A[:, k]
+            numerator = np.abs(np.vdot(a_k, vol)) ** 2
+            # 快速计算分母
+            if iter_idx == 0:
+                # 第一次迭代：近似计算
+                denominator = 240 * (np.sum(P) + 1e-6)
+            else:
+                # 第二次迭代：精确一点
+                try:
+                    R_inv_a = solve_toeplitz(r, a_k)
+                    denominator = np.real(np.vdot(a_k, R_inv_a))
+                except:
+                    denominator = 240 * (np.sum(P) + 1e-6)
+            if denominator > 0:
+                P[k] = numerator / denominator
+        if iter_idx == 2:
+            power_iaa_3 = np.sum(P[48:]) / np.sum(P[...",2025-12-31_量化+雷达算法！用IAA（迭代自适应）算法优化滴水石穿因子，分层回测单调性提升！.py,general
+2026-01-01,2026年的第一天，从短线交易拥挤度这个因子开始！,volume,yes,minute_unspecified,volume,,14,从IC上来看，这个因子最近两三年有失效的趋势。,,研报 / 成交量 / 相关性 / 趋势 / 30分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    vol = BaseDataLoader.load_data(full_path, fields=['volume']).to_dataframe('volume')
+    ratio = vol.iloc[-3:].sum() / vol.sum()
+    vol = vol.iloc[-30:]
+    t_list = np.arange(211, 241).reshape(-1, 1)
+    gu = (vol * t_list).sum() / vol.sum()
+    res = ratio.rank(pct=True) + gu.rank(pct=True)
+    res = pd.concat([res, gu, ratio], axis=1)
+    res.columns = ['stc', 'vol_gravity', 'ratio']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-01_2026年的第一天，从短线交易拥挤度这个因子开始！.py,general
+2026-01-03,日内量价背离斜率，豆老师给的因子IC虽然不高，但是分层似乎还行！,volume,yes,20min_inferred,close|open|volume,,23,无论是alpha因子还是beta因子，其IC都不能算高。,alpha因子的分层回测表现确实是不错的，甚至超出了笔者的意料。因子值最大的一组收益率遥遥领先，因子值最小的一组收益率远远落后于其他组。,研报 / 成交量 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume', 'open'])
+    vol = data.to_dataframe('volume')
+    vol = (vol - vol.mean(axis=1).values.reshape(-1, 1)) / vol.std(axis=1).values.reshape(-1, 1)
+    close = np.log(data.to_dataframe('close')) - np.log(data.to_dataframe('open'))
+    corr_list = []
+    for i in range(20, len(vol) + 1):
+        tmp_corr = close.iloc[i-20:i].corrwith(vol.iloc[i-20:i])
+        corr_list.append(tmp_corr)
+    corr = pd.concat(corr_list, axis=1).T
+    res = self.cal_beta(corr)
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-03_日内量价背离斜率，豆老师给的因子IC虽然不高，但是分层似乎还行！.py,general
+2026-01-04,非流动性因子改得这么复杂，效果真的会好吗？,turnover,yes,1day,close|market_cap|turnover|turnover_ratio|volume,joblib,51,IC确实不是很高，但是2018年的IR居然有2.0。,说实话，这个改进，除了提升了因子的复杂度之外，其他方面可以说是没有任何的提升。,改进 / 复杂 / 换手率 / 非流动性 / 流动性,"def __cal_beta__(data):
+    y = np.abs(data.iloc[:, 0].values)
+    if len(y) < 5:
+        return [np.nan] * 3
+    beta = []
+    for i in range(1, 4):
+        x = np.c_[np.ones((len(data), 1)), data.iloc[:, i].values]
+        beta_full = np.linalg.pinv(x.T @ x) @ x.T @ y
+        beta.append(beta_full[-1])
+    return beta",2026-01-04_非流动性因子改得这么复杂，效果真的会好吗？.py,chenshengrui
+2026-01-09,黑科技！两个相关性很高的因子相减，居然会出现“奇迹”！,other,none,no_code,,,0,从IC上来看，做差之后的因子，IC比原始因子要低了不少，最高的一年都没能超过0.08。,虽然，IC有所下降，但是分层回测可以说是大幅提升了。,研报 / 相关性,,2026-01-09_黑科技！两个相关性很高的因子相减，居然会出现“奇迹”！.py,general
+2026-01-10,对知情交易走火入魔，于是让豆老师推荐一个因子！没想到它还真有点东西！,smart_money,yes,minute_unspecified,circulating_cap|close|open|volume,,23,这个因子和corr\_30比，IC好像没什么太大的差距。,从分层回测来看，这个因子还行也不太行。,波动率 / 换手率 / 相关性 / 60分钟,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    if idx < 243:
+        return pd.DataFrame(columns=['corr_5', 'corr_30', 'corr_60', 'datetime'])
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open'])
+    cap = self.cap.iloc[idx - 243].reindex(data.codes)
+    cap = cap.values.reshape(1, -1)
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    vol = data.to_dataframe('volume')
+    res = []
+    for i in [5, 30, 60]:
+        res.append((vol.rolling(i).sum() / cap).corrwith(rtn.rolling(i).std()))
+    res = pd.concat(res, axis=1)
+    res.columns = ['corr_5', 'corr_30', 'corr_60']
+    res['datetime'] = cur
+    return res",2026-01-10_对知情交易走火入魔，于是让豆老师推荐一个因子！没想到它还真有点东西！.py,general
+2026-01-11,离离原上谱！自信溢出和情绪溢出的相关性，居然分层有提升！,turnover,none,no_code,,,0,这个IC确实不太性，绝对值最高的一年也才勉强超过了0.04，而自信溢出因子IC绝对值最低的一年也超过了0.08，甚至还有一年超过了0.12。,其实，这个分层回测的结果看起来也并不是太好。但是，和自信溢出情绪溢出这两个因子相比，它的单调性可以说是好了太多了。,换手率 / 收益率 / 相关性,,2026-01-11_离离原上谱！自信溢出和情绪溢出的相关性，居然分层有提升！.py,general
+2026-01-14,增强非流动性因子，竟然真的增强了？,other,yes,1day,close|factor|market_cap|turnover|turnover_ratio|volume,joblib,41,用成交额计算的因子只有前三年IC超过0.08，后四年只有2023年超过0.06，最后一年甚至小于0.04。,这个换手率计算因子的分层回测可以说是好也不好。,非流动性 / 流动性,"def __cal_beta__(data):
+    y = data.iloc[:, 0].values
+    if len(y) < 5:
+        return [np.nan] * 3
+    beta = []
+    for i in range(2, 5):
+        data['new'] = data.iloc[:, i] * np.sign(data.iloc[:, 0])
+        x = data.iloc[:, [1, -1]].values
+        x = np.c_[np.ones((len(data), 1)), x]
+        beta_full = np.linalg.pinv(x.T @ x) @ x.T @ y
+        beta.append(beta_full[2])
+    return beta",2026-01-14_增强非流动性因子，竟然真的增强了？.py,chenshengrui
+2026-01-15,量化选基系列（二十二）：跨周期收益迁移因子，_豆老师用它来筛选_“能力可持续”_的基金！,fund_selection,yes,minute_unspecified,,,25,,,复杂 / 收益率 / 震荡,"def __cal_factors__(group):
+    group = group.dropna()
+    col = group.columns.tolist()[0]
+    days = group.index.tolist()
+    idx_list = []
+    res = []
+    for year in range(2017, 2025):
+        cur = pd.to_datetime('{}-12-31'.format(year)) + timedelta(hours=15)
+        idx = bisect.bisect_right(days, cur)
+        if idx < 378:
+            res.append(np.nan)
+        else:
+            tmp = group[[col]].iloc[idx-378:idx].dropna(axis=1)
+            if tmp[col].abs().mean() == 0:
+                res.append(np.nan)
+            else:
+                x1 = tmp.iloc[:126].reset_index(drop=True)
+                x2 = tmp.iloc[126:252].reset_index(drop=True)
+                x3 = tmp.iloc[252:].reset_index(drop=True)
+                corr = (x2[col].corr(x3[col]) + x1[col].corr(x2[col])) / 2
+                res.append(corr)
+        idx_list.append(cur)
+    res = pd.Series(res, index=idx_list, name=col)
+    return res",2026-01-15_量化选基系列（二十二）：跨周期收益迁移因子，_豆老师用它来筛选_“能力可持续”_的基金！.py,general
+2026-01-16,邪修！自创因子识别算法交易，好像有那味了！,smart_money,yes,minute_unspecified,close|high|low|volume,,24,另外两个的IC绝对值可以说是每一年都比展示的因子小一点点，它们2018年只超过了0.06，2020和2021年没能超过0.03，2023年也只有0.04多一点。,先来看看amp\_corr\_vol分层回测结果。,邪修,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    vol, amp = [], []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'high', 'low', 'close'])
+        vol.append(data.to_dataframe('volume'))
+        tmp_amp = (data.to_dataframe('high') - data.to_dataframe('low')) / data.to_dataframe('close').shift()
+        amp.append(tmp_amp)
+    vol = self.cal_zscore(vol)
+    vol = vol * np.where(vol > 1, 1.0, np.nan)
+    cur = amp[-1].reindex(columns=vol.columns)
+    cur_ts_zscore = (cur - cur.mean().values.reshape(1, -1)) / cur.std().values.reshape(1, -1)
+    cur_zscore = (cur - cur.mean(axis=1).values.reshape(-1, 1)) / cur.std(axis=1).values.reshape(-1, 1)
+    amp_zscore = self.cal_zscore(amp)
+    res = [amp_zscore.corrwith(vol), cur_zscore.corrwith(vol), cur_ts_zscore.corrwith(vol)]
+    res = pd.concat(res, axis=1)
+    res.columns = ['amp_corr_vol', 'amp_corr_vol_zscore', 'amp_corr_vol_ts_zscore']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-16_邪修！自创因子识别算法交易，好像有那味了！.py,general
+2026-01-17,增强之后，非流动性因子居然还能再增强！用1分钟数据计算，4年IC超0.1！,other,yes,1day,circulating_cap|close|factor|open|turnover|volume,,45,从IC上来看，有四年的IC超过了0.1，六年IC超过0.08，确实比增强非流动性因子强了不少。,虽然，因子的IC看起来有一定的提升，但是分层回测和增强非流动性因子相比就没什么区别了，至少用肉眼很难看出来区别。,研报 / 非流动性 / 流动性 / 1分钟 / 30分钟,"def process_single_day(self, idx):
+    if idx < 243:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    vol, money, rtn, tr = [], [], [], []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+        vol.append(data.to_dataframe('volume'))
+        money.append(data.to_dataframe('turnover'))
+        tmp_cap = self.cap.iloc[idx - 243].reindex(data.codes)
+        tr.append(vol[-1] / tmp_cap.values.reshape(1, -1))
+        tmp_factor = self.factor.iloc[idx - 243].reindex(data.codes)
+        tmp_close = data.to_dataframe('close') * tmp_factor.values.reshape(1, -1)
+        rtn.append(tmp_close)
+    rtn = pd.concat(rtn).pct_change()
+    vol = pd.concat(vol)
+    money = pd.concat(money)
+    tr = pd.concat(tr)
+    res = []
+    for i in range(rtn.shape[1]):
+        res.append(self.cal_beta(rtn.iloc[:, i], vol.iloc[:, i], money.iloc[:, i], tr.iloc[:, i]))
+    res = pd.DataFrame(data=res, index=rtn.columns, columns=['vol', 'money', 'tr'])
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-17_增强之后，非流动性因子居然还能再增强！用1分钟数据计算，4年IC超0.1！.py,chenshengrui
+2026-01-19,云月裁，让DeepSeek装一把诗人，它居然给出了这么一个因子！,other,yes,minute_unspecified,close|high|low|open|turnover|volume,,26,这不是笔者第一次让AI大模型输出一个因子了，但是这次有点不一样，这个因子的IC确实出乎了我的意料。,虽然云月裁因子的IC表现不错，但是在分层回测上的表现就不尽如人意了。,,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'turnover',
+                                                       'open', 'low', 'high', 'close']).to_dataframes()
+    thick = ((data['high'] - data['low']) / data['open']) * data['turnover']
+    thick = thick.ewm(span=9).mean()
+    rift = 1 - (data['close'] - data['open']) / (data['high'] - data['low'] + 0.001)
+    light = data['volume'] / data['volume'].ewm(span=21).mean() - 1
+    direction = np.sign(data['close'] - data['open']) * (1 - 2 * rift)
+    step = []
+    for i in range(13, len(thick)+1):
+        corr = thick.iloc[i-13:i].corrwith(light.iloc[i-13:i])
+        step.append(corr)
+    step = pd.concat(step, axis=1).T
+    step.index = thick.index.tolist()[12:]
+    step = step.reindex(direction.index.tolist())
+    trend = light.rolling(8).std() / (thick.rolling(8).std() + 0.001)
+    factor = step * np.exp(-direction) * (1 - np.tanh(light*trend)) * rift
+    cols = ['thick', 'rift', 'light', 'direction', 'step', 'trend', 'factor']
+    res = pd.DataFrame(columns=cols,index=factor.columns.tolist())
+    for key in cols:
+        res[key] = eval(key).mean()
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-19_云月裁，让DeepSeek装一把诗人，它居然给出了这么一个因子！.py,general
+2026-01-21,基于异常收益率的注意力捕捉，一个结合了涨跌停数量、Fama-French三因子模型和动量的超复杂因子！,academic,yes,1day,close|factor|limit_down|limit_up|market_cap|pb_ratio|sw_l1_code,joblib,113,,这个因子没啥好总结的了，毕竟它的复杂程度就能阻止大部分人使用它了。,研报 / 复杂 / 换手率 / 动量 / 收益率,"def __cal_beta__(data):
+    y = data.iloc[:, 0].values
+    if len(y) < 5:
+        return [np.nan] * 2
+    beta = []
+    for i in range(1,3):
+        x = data.iloc[:, [i, 2, 3, 4, 5, 6]].values
+        x = np.c_[np.ones((len(data), 1)), x]
+        beta_full = np.linalg.pinv(x.T @ x) @ x.T @ y
+        beta.append(abs(beta_full[1]))
+    return beta",2026-01-21_基于异常收益率的注意力捕捉，一个结合了涨跌停数量、Fama-French三因子模型和动量的超复杂因子！.py,chenshengrui
+2026-01-24,单一成交额占比熵，这个因子用30分钟数据计算，效果炸裂！,volume,yes,30min_inferred,close|volume,,10,IC有五年超过了0.08，其中还有两年超过了0.1，表现确实不错。,从2020年下半年开始，因子值最大的两组的表现就开始遥遥领先其他三组。同时，从2020年下半年开始，分层回测的净值曲线的区分度也是非常高的。,研报 / 成交量 / 30分钟,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close']).to_dataframes()
+    money = data['close'] * data['volume']
+    money = money / (data['close'].sum() * data['volume'].sum()).values.reshape(1, -1)
+    res = -(money * np.log(money)).sum()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-24_单一成交额占比熵，这个因子用30分钟数据计算，效果炸裂！.py,general
+2026-01-25,我还是对它念念不忘！用换手率和振幅的相关性来识别算法交易，IC大幅提升！,smart_money,yes,minute_unspecified,high|low|open|volume,,43,从IC来看，这个因子的IC绝对值有五年超过了0.06，这是远超之前因子的表现的。,这个因子虽然在IC上有所提升了，但是分层回测的表现依旧是不尽如人意的。从某种意义上来说，它甚至不如zscore\_corr这个因子。,邪修 / 振幅 / 换手率 / 相关性,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    if idx < 243 or cur >= pd.to_datetime('2026-01-01'):
+        return pd.DataFrame(columns=['same_min_corr', 'corr', 'ts_zscore_corr', 'zscore_corr', 'datetime'])
+    tr, amp = [], []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'high', 'low', 'open'])
+        cap = self.cap.iloc[i - 243].reindex(data.codes)
+        cap = cap.values.reshape(1, -1)
+        tr.append(data.to_dataframe('volume') / cap)
+        tmp_amp = (data.to_dataframe('high') - data.to_dataframe('low')) / data.to_dataframe('open')
+        amp.append(tmp_amp)
+    tr_zscore_same_min = self.cal_zscore(tr)
+    amp_zscore_same_min = self.cal_zscore(amp)
+    cur_tr = tr[-1]
+    cur_amp = amp[-1]
+    cur_tr_ts_zscore = (cur_tr - cur_tr.mean().values.reshape(1, -1)) / cur_tr.std().values.reshape(1, -1)
+    cur_tr_zscore = (cur_tr - cur_tr.mean(axis=1).values.reshape(-1, 1)) / cur_tr.std(axis=1).values.reshape(-1, 1)
+    cur_amp_ts_zscore = (cur_amp - cur_amp.mean().values.reshape(1, -1)) / cur_amp.std().values.reshape(1, -1)
+    cur_amp_zscore = (cur_amp - cur_amp.mean(axis=1).values.reshape(-1, 1)) / cur_amp.std(axis=1).values.reshape(-1, 1)
+    res = pd.concat([amp_zscore_same_min.cor...",2026-01-25_我还是对它念念不忘！用换手率和振幅的相关性来识别算法交易，IC大幅提升！.py,general
+2026-01-26,特质换手率波动，当Fama-French模型和换手率结合，居然有6年IC绝对值超过0.1！,academic,yes,1day,close|factor|market_cap|pb_ratio|turnover_ratio,joblib,75,这个因子在IC上的表现可以说是非常不错了，疑似有六年的IC绝对值超过了0.1（2020年的IC绝对值感觉超一点点超过0.1）。,分层回测的结果显示这是一个空头因子，因子值最大的一组收益率远远低于其他四组。,复杂 / 波动率 / 换手率 / 动量 / 残差,"def cal_resi(self, idx):
+    y = self.market_cap['turnover_ratio'].iloc[idx-21:idx, :]
+    x = self.premium.iloc[idx-21:idx, :]
+    data = y.join(x)
+    day = y.index.tolist()[-1]
+    res = []
+    for code in self.codes:
+        cols = [code] + ['tmom', 'thml', 'tsmb', 'mkt']
+        tmp = y[cols].dropna()
+        res.append(self.__cal_beta__(tmp))
+    res = pd.DataFrame(res, columns=['resi_sigma'], index=self.codes)
+    res['datetime'] = day
+    return res
+@staticmethod",2026-01-26_特质换手率波动，当Fama-French模型和换手率结合，居然有6年IC绝对值超过0.1！.py,general
+2026-01-28,潜流承底，这一次AI模仿曹春晓老师模仿到了精髓！,other,yes,minute_unspecified,close|low|open|volume,,19,,从分层回测来看，这个因子应该是中间差两头好的因子。,改进 / 日内,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'low', 'volume'])
+    vol = data.to_dataframe('volume')
+    vol = vol.rolling(5).sum()
+    vol_chg = vol.pct_change()
+    close = data.to_dataframe('close')
+    open_ = data.to_dataframe('open')
+    low = data.to_dataframe('low')
+    rtn_5 = close / open_.shift(4) - 1
+    rtn_1 = close / open_ - 1
+    low_dev = 1 - low.rolling(5).mean() / low
+    flag = (rtn_5 < 0) & (vol_chg < -0.2) & (rtn_1 > -0.01)
+    cs = low_dev / (abs(vol.diff()) / vol.shift(1))
+    res = (cs * np.where(flag, 1, np.nan)).mean()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-28_潜流承底，这一次AI模仿曹春晓老师模仿到了精髓！.py,general
+2026-01-31,这次的非流动性因子，真的不知道该起什么名字了！,academic,yes,minute_unspecified,close|open|turnover|volume,,42,从IC来看，这个因子在2021年之前可以说是没啥作用的，从2022年开始勉强有那么一点点作用。,分层回测的表现印证了之前的IC分析，多头组的收益从2022年开始超越其他组，并最终成为了整个回测区间中收益最高的一组。,研报 / 非流动性 / 流动性 / Beta,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    if idx < 243 or pd.to_datetime(date_str) >= pd.to_datetime('2026-01-01'):
+        return pd.DataFrame({})
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    data.to_dataframe('volume')
+    tmp_cap = self.cap.iloc[idx - 243].reindex(data.codes)
+    tr = vol / tmp_cap.values.reshape(1, -1)
+    vol = (np.log(rtn.abs() / vol)).diff()
+    money = (np.log(rtn.abs() / money)).diff()
+    tr = (np.log(rtn.abs() / tr)).diff()
+    res = []
+    for data in [vol, money, tr]:
+        res.append(self.cal_beta(data))
+    res = pd.concat(res, axis=1)
+    res.columns = ['vol', 'money', 'tr']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-01-31_这次的非流动性因子，真的不知道该起什么名字了！.py,zhengzhaolei
+2026-02-01,黑科技+1！中值减去均值，分层回测效果也将变得炸裂！,other,yes,minute_unspecified,close|open|turnover|volume,,17,用均值合成的因子，IC最高的一年超过了0.07，超过0.04的年份数为3。整体来说，两者差不多。,这是用标准差合成的因子的分层回测结果。,,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['turnover', 'close', 'open', 'volume'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    sigma = rtn.std(axis=1)
+    sigma = sigma < sigma.mean()
+    turnover = data.to_dataframe('turnover')
+    turnover = turnover[sigma].corr().abs()
+    mask = np.eye(turnover.shape[0], turnover.shape[1], dtype=bool)
+    res = pd.concat([turnover.mask(mask, np.nan).mean(axis=1),
+                     turnover.mask(mask, np.nan).median(axis=1)], axis=1)
+    res.columns = ['money_mean', 'money_med']
+    res['diff'] = res['money_med'] - res['money_mean']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-02-01_黑科技+1！中值减去均值，分层回测效果也将变得炸裂！.py,general
+2026-02-02,遗憾规避，没有逐笔数据就只能魔改了，没想到IC居然很高！,volume,yes,minute_unspecified,close|turnover|volume,,31,有一说一，这个因子的IC表现确实不错，六年超过0.08，其中四年超过0.1。,虽然IC表现很不错，但是分层回测看起来就很一般了，或者说又是一个空头因子。,研报 / 成交量 / 1分钟,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['turnover', 'close', 'volume'])
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    if cur > pd.to_datetime('2026-01-01') or cur < pd.to_datetime('2005-01-01'):
+        return pd.DataFrame(columns=['hcvol', 'lcvol', 'hcp', 'lcp'])
+    factor = self.factor.loc[cur]
+    factor = factor.reindex(data.codes)
+    close = data.to_dataframe('close') * factor.values.reshape(1, -1)
+    if self.last_close is not None:
+        close = pd.concat([self.last_close, close])
+        self.last_close = close.iloc[[-1]]
+    flag_up = close.diff() > 0
+    flag_dowm = close.diff() < 0
+    money = data.to_dataframe('turnover')
+    vol = data.to_dataframe('volume')
+    tot_vol = vol.sum()
+    vwap = money / vol
+    end_close = data.to_dataframe('close').iloc[-1]
+    buy_down = vwap * np.where(flag_up, 1.0, np.nan) > end_close
+    sell_up = vwap * np.where(flag_dowm, 1.0, np.nan) < end_close
+    hcvol = (buy_down * vol).sum()
+    lcvol = (sell_up * vol).sum()
+    hcp = ((buy_down * money).sum() / hcvol) / end_close - 1
+    lcp = ((sell_up * money).sum() / lcvol) / end_close - 1
+    res = pd.concat([hcvol / tot_vol, lcvol/ tot_vol, hcp, lcp], axis=1)
+    res.columns = ['hcvol', 'lcvol', 'hcp', 'lcp']
+    res['datetime'] = cur
+    return res",2026-02-02_遗憾规避，没有逐笔数据就只能魔改了，没想到IC居然很高！.py,general
+2026-02-03,邪修！同价波动率中的alpha因子，一下整出来7个因子，而且IC都还不错！,volatility,yes,minute_unspecified,close|open,,29,这个因子的IC看起来还是不错的，有5年超过了0.08。,这个是用均值/标准差合成因子的分层回测结果，其表现是最好的。,邪修 / 成交量 / 波动率 / 收益率,"def cal_factors(data):
+    close = data.iloc[-1, 0]
+    high = np.nanmax(data.iloc[:, 0])
+    low = np.nanmin(data.iloc[:, 0])
+    data['open'] = data['close'] / data['open'] - 1
+    data = data.groupby('close').std()
+    data.sort_index(inplace=True)
+    data.reset_index(inplace=True)
+    max_idx = np.argmax(data['open'])
+    max_price = data.iloc[max_idx]['close']
+    min_idx = np.argmin(data['open'])
+    min_price = data.iloc[min_idx]['close']
+    return [max_price / low, max_price / high, max_price / close,
+            min_price / low, min_price / high, min_price / close, max_price / min_price]",2026-02-03_邪修！同价波动率中的alpha因子，一下整出来7个因子，而且IC都还不错！.py,general
+2026-02-04,基于换手率的注意力捕捉，又是一个超级复杂的日频因子！,turnover,yes,unclear,,,6,这个因子的IC并不是太高，这一点和之前的基于异常收益率的注意力捕捉因子看起来是一致的。,这个分层回测结果只能说比较一般，但是和用换手率标准差来计算的相比就要好了不少了。,复杂 / 换手率 / 动量 / 收益率 / 异常,"def cal_tr_data(group):
+        group = group.dropna()
+        group['tr_mu'] = group['tr'].mean()
+        group['tr_sigma'] = group['tr'].std()
+        return group[['tr_mu', 'tr_sigma']]",2026-02-04_基于换手率的注意力捕捉，又是一个超级复杂的日频因子！.py,chenshengrui
+2026-02-10,apbeta因子，一大堆相似性很高的因子相减之后，分层回测再次炸裂提升！,other,yes,minute_unspecified,close|open|turnover|volume,,33,这个因子的IC表现很一般。,,研报 / 非流动性 / 流动性,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    if idx < 243 or pd.to_datetime(date_str) >= pd.to_datetime('2026-01-01'):
+        return pd.DataFrame({})
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'open', 'turnover'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    vol = data.to_dataframe('volume')
+    money = data.to_dataframe('turnover')
+    data.to_dataframe('volume')
+    tmp_cap = self.cap.iloc[idx - 243].reindex(data.codes)
+    tr = vol / tmp_cap.values.reshape(1, -1)
+    vol = (np.log(rtn.abs() / vol)).diff()
+    money = (np.log(rtn.abs() / money)).diff()
+    tr = (np.log(rtn.abs() / tr)).diff()
+    res = []
+    for data in [vol, money, tr]:
+        tmp = data.replace(np.inf, np.nan)
+        tmp = tmp.replace(-np.inf, np.nan)
+        mkt_vol = tmp.mean(axis=1)
+        mkt_rtn = rtn.mean(axis=1)
+        denominator = (np.square(mkt_rtn - mkt_vol - (mkt_rtn.mean() - mkt_vol.mean()))).sum()
+        ap_beta1 = (rtn - rtn.mean().values.reshape(1, -1)) * ((mkt_rtn - mkt_rtn.mean()).values.reshape(-1, 1))
+        ap_beta1 = ap_beta1.sum()/ denominator
+        # ap_beta2 = (tmp - tmp.mean().values.reshape(1, -1)) * ((mkt_rtn - mkt_rtn.mean()).values.reshape(-1, 1))
+        # ap_beta2 = ap_beta2.sum() / denominator
+        ap_beta3 = (rtn - rtn.mean().values.reshape(1, -1)) * ((mkt_vol- mkt_vol.mean()).values...",2026-02-10_apbeta因子，一大堆相似性很高的因子相减之后，分层回测再次炸裂提升！.py,zhengzhaolei
+2026-02-11,邪修！或许这才是换手率因子的正确打开方式，分层回测效果显著提升！,turnover,none,no_code,,,0,这个邪修后的因子，其IC的表现略微超于传统的换手率因子。最直观的差异体现在2022年，在这一年传统换手率因子的IC绝对值超过了0.1，但是邪修的因子其IC绝对值略微低于0.1。,这个因子的分层回测虽然没有表现出完美的单调性，但是其多空收益还是挺高的。,邪修 / 研报 / 换手率,,2026-02-11_邪修！或许这才是换手率因子的正确打开方式，分层回测效果显著提升！.py,general
+2026-02-13,魔改量价关系的高频乐章，竟然得到了一个六年IC超0.1的因子！,other,yes,minute_unspecified,close|volume,,45,这个IC的表现真的很不错了，有六年超过了0.1，其中还有1年到达了0.12。即使是最低的一年，也接近0.08了。,虽然这个因子在IC上的表现很出色，但是其分层回测的表现可以说是差了那么一点点，黄线的年化收益超过了蓝线。,研报,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    if cur <= pd.to_datetime('2010-01-01') or cur >= pd.to_datetime('2026-01-01'):
+        return pd.DataFrame(columns=['tr', 'tr_new'])
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close'], codes=self.codes).to_dataframes()
+    ret = np.abs(np.log(1 + data['close'].pct_change().shift(1)))
+    tr_new, tr = [], []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        vol = BaseDataLoader.load_data(full_path, fields=['volume'], codes=self.codes).to_dataframe('volume')
+        cap = self.market_cap['circulating_cap'].iloc[i - 243]
+        cap = cap.values.reshape(1, -1)
+        self.tr = vol / cap
+        self.neutralize(idx)
+        tr_new.append(self.res)
+        tr.append(self.tr)
+    tr = pd.concat(tr)
+    tr['minute'] = tr.index.hour * 60 + tr.index.minute
+    tr = tr.groupby('minute', as_index=False, group_keys=False).apply(self.z_score)
+    tr_new = pd.concat(tr_new)
+    tr_new['minute'] = tr_new.index.hour * 60 + tr.index.minute
+    tr_new = tr_new.groupby('minute', as_index=False, group_keys=False).apply(self.z_score)
+    res = pd.concat([ret.corrwith(tr), ret.corrwith(tr_new)])
+    res.columns = ['tr', 'tr_new']
+    res['datetime'] = cur
+    ret...",2026-02-13_魔改量价关系的高频乐章，竟然得到了一个六年IC超0.1的因子！.py,general
+2026-02-16,一元复始，豆老师的超能模式给了我一个4年IC绝对值超过0.1的超级因子！,other,yes,minute_unspecified,close|low|open|volume,,15,从IC来看，这个因子的表现还是不错的。,虽然这个因子的IC表现很好，但是分层回测就差了一点点了。,,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume', 'close', 'low', 'open'])
+    date_str = file_name.split('.')[0]
+    low = data.to_dataframe('low').rolling(10).min()
+    rtn_reverse = data.to_dataframe('close') / low - 1
+    rtn_daily = data.to_dataframe('close').iloc[-1] / data.to_dataframe('open').iloc[0] - 1
+    vol = data.to_dataframe('volume')
+    spring = ((vol / vol.rolling(10).mean() > 1.2) & (rtn_reverse > 0.01)).mean()
+    res = pd.concat([spring, rtn_daily, spring * (1 + rtn_daily)], axis=1)
+    res.columns = ['spring', 'rtn_daily', 'factor']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    res.index.name = 'code'
+    return res.reset_index()",2026-02-16_一元复始，豆老师的超能模式给了我一个4年IC绝对值超过0.1的超级因子！.py,general
+2026-02-17,前景价值，老外的因子能克服水土不服吗？,academic,yes,1day,close|factor,tqdm,46,这个结果就没有什么分析的必要了。,不得不说，这个因子的表现真是一言难尽啊！,,"def cal_factors(self, data):
+    data = data.dropna()
+    if len(data) <= 5:
+        return np.nan
+    data.sort_values(inplace=True)
+    tk = 0
+    l = len(data)
+    m = len(data[data < 0])
+    n = l - m
+    for i in range(m):
+        val = data.iloc[i]
+        tk += self.v_func(val) * (self.w_minus((i+1) / l) - self.w_minus(i / l))
+    for i in range(n):
+        val = data.iloc[m+i]
+        tk += self.v_func(val) * (self.w_plus((n - i + 1) / l) - self.w_plus((n - i) / l))
+    return tk",2026-02-17_前景价值，老外的因子能克服水土不服吗？.py,general
+2026-02-24,过度自信，一个分层回测有点逆天的因子！,other,yes,1min_inferred,close|open,,19,,虽然，这个因子的IC并不是太高，但是它的分层回测的表现可以说是相当不错。,研报,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    # 加载当日分钟数据
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open'])
+    rtn = data.to_dataframe('close') / data.to_dataframe('open') - 1
+    mu = rtn.mean()
+    sigma = rtn.std()
+    up_flag = (rtn > mu + sigma).reset_index(drop=True)
+    down_flag = (rtn < mu - sigma).reset_index(drop=True)
+    res = []
+    for i in range(rtn.shape[1]):
+        res.append(self.cal_med(down_flag.iloc[:, i]) - self.cal_med(up_flag.iloc[:, i]))
+    res = pd.Series(data=res, index=data.codes, name=pd.to_datetime(date_str) + timedelta(hours=15))
+    return res",2026-02-24_过度自信，一个分层回测有点逆天的因子！.py,general
+2026-02-25,脑洞大开，参考三篇研报设计了一个净逆向投资者买入占比因子，没想到效果还不错！,reversal,yes,minute_unspecified,circulating_cap|close|high|low|open|volume,,23,这个胡诌的因子的IC表现挺不错的，但是和[这个因子竟然连续6年IC绝对值超过0.1！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247490289&idx=1&sn=c0...,分层回测的结果并不是很好，但是和[这个因子竟然连续6年IC绝对值超过0.1！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247490289&idx=1&sn=c067ee...,研报,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume', 'open', 'high', 'low'])
+    close = data.to_dataframe('close')
+    vol = data.to_dataframe('volume')
+    rtn = close / data.to_dataframe('open') - 1
+    mu = rtn.mean()
+    sigma = rtn.std()
+    up_flag = (rtn > mu + sigma)
+    down_flag = (rtn < mu - sigma)
+    prob = (close - data.to_dataframe('low')) / (data.to_dataframe('high') - data.to_dataframe('low'))
+    vol = vol * prob
+    res = (vol * down_flag).sum() - (vol * up_flag).sum()
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-02-25_脑洞大开，参考三篇研报设计了一个净逆向投资者买入占比因子，没想到效果还不错！.py,general
+2026-02-27,收益率极大值幅度：一个我差点错过的超级多头因子！,other,yes,minute_unspecified,close,,15,这个因子和过度自信因子有点类似，IC并不是很高，但是其分层回测却相当优秀。,在2021年之前，五组之间的净值差异并不是太大，但是从2021年之后差距逐渐拉开了。同时，多头组也开始遥遥领先了。,邪修 / 研报 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, codes=self.codes, fields=['close']).to_dataframe('close')
+    rtn = data.pct_change(5)
+    rtn_1 = data.pct_change(1)
+    q = rtn_1.quantile([0.05, 0.95])
+    ex_rtn_max_val = (np.where(rtn > q.iloc[-1], 1.0, np.nan) * rtn).mean() / q.iloc[-1]
+    ex_rtn_min_freq = (rtn < q.iloc[0]).sum()
+    res = pd.concat([ex_rtn_max_val, ex_rtn_min_freq], axis=1)
+    res.columns = ['ex_rtn_max_val', 'ex_rtn_min_freq']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-02-27_收益率极大值幅度：一个我差点错过的超级多头因子！.py,general
+2026-03-02,邪修！五觅知情交易，终于出现了一个分层不错的因子！,smart_money,yes,minute_unspecified,close|high|low|open|volume,,23,从IC上来看，这个因子的IC绝对值并不算高，即使和前四篇寻找知情交易者的因子相比，它也不算高。,这个因子的分层回测结果并不完美，但是和之前的四篇文章中介绍的因子相比，笔者觉得它是最好的。,邪修 / 研报,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    vol = []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume', 'high', 'low', 'open', 'close'])
+        vol.append(data.to_dataframe('volume'))
+    vol_zscore = self.cal_zscore(vol) > 1
+    ratio = vol_zscore.rolling(5).mean()
+    sigma = []
+    for i in range(5, len(data.trade_days) + 1):
+        sigma.append(self.cal_sigma(data.data[i-5:i, 1:, :]))
+    sigma = pd.DataFrame(sigma, columns=data.codes, index=data.trade_days[4:])
+    res = ratio.corrwith(sigma)
+    res.name = cur
+    return res",2026-03-02_邪修！五觅知情交易，终于出现了一个分层不错的因子！.py,general
+2026-03-04,高位成交量占比，魔改一个事件驱动因子后，结果让我震惊！,volume,yes,minute_unspecified,close|volume,,14,这个因子的IC为负，符合预期。,这个因子的分层回测中规中矩。,研报 / 成交量 / 事件驱动,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'volume'])
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    close = data.to_dataframe('close')
+    vol = data.to_dataframe('volume')
+    high_pos = close > close.mean() + 1.5 * close.std()
+    tot_vol = vol.sum()
+    res = (np.where(high_pos, 1.0, np.nan) * vol).sum()
+    res = res / tot_vol
+    res.name = cur
+    return res",2026-03-04_高位成交量占比，魔改一个事件驱动因子后，结果让我震惊！.py,general
+2026-03-05,用“么么哒”算法计算收益率噪音偏离因子，又是一个差点错过的好因子！,other,yes,minute_unspecified,close,,40,这个因子的IC仍旧不高，没有一年的绝对值超过了0.08，超过0.07的也只有两年。,虽然，这个因子的IC绝对值并不是很高，但是，其分层回测却看起来还不错，甚至还是一个多头因子。,研报 / 收益率,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    if idx < 243 or cur_time >= pd.to_datetime('2026-01-01'):
+        return pd.Series(name=cur_time)
+    close = []
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['close'])
+        factor = self.factor.iloc[idx - 243].reindex(data.codes)
+        close.append(data.to_dataframe('close') * factor.values.reshape(1, -1))
+    his = pd.concat(close).pct_change()
+    cur = his.iloc[-240:]
+    his = (his - his.mean().values.reshape(1, -1))
+    his = his / his.std().values.reshape(1, -1)
+    cur = (cur - cur.mean().values.reshape(1, -1))
+    cur = cur / cur.std().values.reshape(1, -1)
+    res = cur.skew().to_frame()
+    res.columns = ['skew']
+    mmd = []
+    for i in range(len(cur.columns)):
+        tmp_cur = cur.iloc[:, i].dropna()
+        if len(tmp_cur) < 120:
+            mmd.append(np.nan)
+        else:
+            tmp_his = his.iloc[-240:, i].dropna()
+            mmd.append(self.compute_mmd(tmp_cur.values, tmp_his.values))
+    res['mmd'] = mmd
+    res['datetime'] = cur_time
+    return res",2026-03-05_用“么么哒”算法计算收益率噪音偏离因子，又是一个差点错过的好因子！.py,zhengzhaolei
+2026-03-06,筹码收益，一个神奇的因子！,other,yes,1day,close|factor|turnover|turnover_ratio|vwap,tqdm,27,IC有点年份为正，有的年份为负，显然这是一个因子不稳定的表现。,这个回撤和波动真的不是一般人能承受的。,研报,"def cal_factors(tr, vwap, amt):
+    tr = tr.shift(-1).fillna(0)
+    tr.sort_index(ascending=False, inplace=True)
+    tr = (1 - tr / 100).clip(lower=0, upper=1)
+    tr = tr.cumprod()
+    rsd_amt = (amt * tr).iloc[:-1]
+    res = (vwap.iloc[:-1] * rsd_amt).sum() / rsd_amt.sum()
+    return vwap.iloc[-1] / res",2026-03-06_筹码收益，一个神奇的因子！.py,weijianrong
+2026-03-09,修正的振幅，没想到曹老师的研报中还有这样的“漏网之鱼”！,other,yes,1day,close|high|jumps_1min|low,,12,这个因子的IC表现在曹老师的因子中并不算好，因为它只有2019年这一年的绝对值超过了0.1，而2024年的绝对值只是勉强超过了0.04。,这个分层回测的结果就比较一般了，虽然不同颜色的线之间相交的情况并不是太多，但是其单调性不好，黄线在蓝色的上面。,研报 / 振幅,"def __call__(self):
+    jump = BaseDataLoader.load_data('../曹春晓/日内跳跃度/jump.parquet', fields=['jumps_1min']).to_dataframe('jumps_1min')
+    data = BaseDataLoader.load_data('../../data/stock_bar_1day.parquet', fields=['close', 'high', 'low']).to_dataframes()
+    amp = (data['high'] - data['low']) / data['close'].shift()
+    dfs = {'amp': amp}
+    flag = jump > jump.mean(axis=1).values.reshape(-1, 1)
+    flag = flag.reindex(amp.index.tolist())
+    flag = flag.reindex(columns=amp.columns.tolist())
+    modify_amp = amp * np.where(flag, 1.0, -1.0)
+    dfs['modify_amp'] = modify_amp
+    df = dfs_to_df(dfs)
+    df.to_parquet('./modify_amp.parquet')",2026-03-09_修正的振幅，没想到曹老师的研报中还有这样的“漏网之鱼”！.py,caochunxiao
+2026-03-10,邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！,other,yes,minute_unspecified,close|market_cap|sw_l1_code,,57,从IC上来看，优化后的因子IC绝对值有4年超过了0.08，其中还有一年超过了0.12，而在原始因子中IC绝对值只有三年超过0.06。,分层回测上，多头收益和原始因子差不多，但是空头收益更低，因此其多空收益更高。,邪修 / 收益率,"def __cal_factors__(self, group):
+    group.sort_values(by='cap', inplace=True)
+    start = 0
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        codes = tmp_group.index.tolist()
+        tmp_data = self.rtn_1[codes]
+        tmp_data[:] = tmp_data.mean(axis=1).values[:, np.newaxis]
+        if self.res is None:
+            self.res = tmp_data.quantile([0.05, 0.95])
+        else:
+            self.res = self.res.join(tmp_data.quantile([0.05, 0.95]))
+        start = end",2026-03-10_邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！.py,general
+2026-03-13,成交量极大值分布，读不懂的研报，效果意外的因子！,volume,yes,minute_unspecified,volume,,18,从IC上来看，这个因子在2018年到2022年这三年还是有效的，但是从2021年开始，似乎失效了。,从分层回测上来看，超额收益都是2020年这一年积累的。resample\_mu这个因子的表现也类似。,研报 / 成交量,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['volume']).to_dataframe('volume')
+    resample_data = []
+    for i in range(1000):
+        new_data = data.iloc[:]
+        resample_data.append(new_data.sample(2400, replace=True).mean())
+    resample_data = pd.concat(resample_data, axis=1)
+    resample_data = resample_data - resample_data.mean(axis=1).values.reshape(-1, 1)
+    res = [resample_data.mean(axis=1), resample_data.std(axis=1)]
+    res = pd.concat(res, axis=1)
+    res.columns = ['resample_mu', 'resample_sigma']
+    res['datetime'] = cur_time
+    return res",2026-03-13_成交量极大值分布，读不懂的研报，效果意外的因子！.py,zhengzhaolei
+2026-03-16,波动率的分布，这个专题似乎没有研报聊过！,volatility,yes,minute_unspecified,close|high|low|open,,25,这个因子的IC还不错，至少比收益率极大值幅度的IC绝对值要高出不少。,虽然，这个因子在IC上的表现好于收益率极大值幅度这个因子，但是分层回测就不行了。,研报 / 成交量 / 波动率 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'high', 'low'])
+    prefer_sigma_5 = []
+    prefer_sigma_30 = []
+    for i in range(5, len(data.data)):
+        tmp_data = data.data[i-5:i, :, :].reshape(-1, len(data.codes))
+        tmp_sigma = np.nanstd(tmp_data, axis=0) / np.nanmean(tmp_data, axis=0)
+        prefer_sigma_5.append(tmp_sigma)
+        if i >= 30:
+            tmp_data = data.data[i - 30:i, :, :].reshape(-1, len(data.codes))
+            tmp_sigma = np.nanstd(tmp_data, axis=0) / np.nanmean(tmp_data, axis=0)
+            prefer_sigma_30.append(tmp_sigma)
+    prefer_sigma_5 = pd.DataFrame(prefer_sigma_5, columns=data.codes)
+    prefer_sigma_30 = pd.DataFrame(prefer_sigma_30, columns=data.codes)
+    q = prefer_sigma_5.quantile(0.95)
+    flag = prefer_sigma_30 > q
+    prefer_sigma_30 = (prefer_sigma_30 * np.where(flag, 1.0, np.nan)).mean() / q
+    res = prefer_sigma_30.to_frame()
+    res.columns = ['prefer_sigma']
+    res['datetime'] = cur",2026-03-16_波动率的分布，这个专题似乎没有研报聊过！.py,general
+2026-03-20,残差收益噪声偏离，分层回测效果炸裂！这应该算独创性因子了吧！,other,yes,minute_unspecified,close,sklearn.LinearRegression,39,和第一版的收益率噪声偏离因子相比，它的IC绝对值略微提升，只要体现在2018年和2023年的绝对值超过了0.08，而2024年超过了0.03。,至于分层回测的提升，那就更显著了。,研报 / 残差 / 收益率,"def cal_resi(data):
+    if data.iloc[:, 0].sum() == 0:
+        return None
+    lr = LinearRegression()
+    lr.fit(data.iloc[:, 1:], data.iloc[:, 0:1])
+    resi = data.iloc[:, 0:1] - lr.predict(data.iloc[:, 1:])
+    return resi / resi.std()",2026-03-20_残差收益噪声偏离，分层回测效果炸裂！这应该算独创性因子了吧！.py,general
+2026-03-23,基于马尔科夫链的聪明钱因子V4，分层回测好于V3，两者相关性仅0.5！,smart_money,yes,minute_unspecified,close|open|turnover|volume,,41,V4版本的因子在IC上的表现是不如V3版本的。,在V3版本的分层回测中，紫线在2019年到2023年这4年的时间里，有时候落后于红线，有时候落后于绿线，有时候落后于黄线。,研报 / 相关性 / 聪明钱,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume', 'turnover']).to_dataframes()
+    rtn = data['close'] / data['open'] - 1
+    rtn['mkt'] = rtn.mean(axis=1)
+    prob = self.cal_prob(rtn, rtn['mkt'])
+    thd = prob['mkt'].quantile(0.05)
+    flag = (prob.iloc[:, :-1] < thd)
+    res = flag.mean()
+    res = res.to_frame()
+    res.columns = ['anomaly_ratio']
+    res['datetime'] = cur_time
+    money = data['turnover'].shift(-4).dropna()
+    vol = data['volume'].shift(-4).dropna()
+    anomaly_vwap = (money * np.where(flag, 1.0, np.nan)
+                    ).sum() / (vol * np.where(flag, 1.0, np.nan)).sum()
+    norm_vwap = (money * np.where(flag, np.nan, 1.0)
+                    ).sum() / (vol * np.where(flag, np.nan, 1.0)).sum()
+    res['smart_money'] = anomaly_vwap / norm_vwap
+    return res",2026-03-23_基于马尔科夫链的聪明钱因子V4，分层回测好于V3，两者相关性仅0.5！.py,general
+2026-03-25,魔改过度自信因子，多空收益竟然如此炸裂！,other,yes,minute_unspecified,close|open,sklearn.LinearRegression,33,这个因子的IC表现是有所下降的，特别是在2019年，其IC方向与其他年份的IC方向相反。,一个月之前的过度自信因子，其在分层回测上的表现已经有一点让笔者震惊了。,研报 / 残差 / 收益率,"def cal_resi(y, x):
+    lr = LinearRegression()
+    lr.fit(x, y)
+    resi = y - lr.predict(x)
+    return resi",2026-03-25_魔改过度自信因子，多空收益竟然如此炸裂！.py,general
+2026-03-27,净虹吸效应，拥有8个计算步骤的超复杂因子，能想出来绝对是天才！,volume,yes,5min,close|high|low|turnover|volume,sklearn.LinearRegression,55,这个因子IC绝对值最高的一年都没有超过0.05。,这个因子的分层回测结果展现出了两头好中间差的趋势。,研报 / 复杂 / 成交量 / 反转 / 资金流,"def cal_resi(data):
+    data = data.dropna()
+    lr = LinearRegression()
+    lr.fit(data.iloc[:, :1], data.iloc[:, 1:])
+    resi = data.iloc[:, 1:] - lr.predict(data.iloc[:, :1])
+    resi.columns = ['net_siphon']
+    return resi",2026-03-27_净虹吸效应，拥有8个计算步骤的超复杂因子，能想出来绝对是天才！.py,general
+2026-03-30,换手率极大值幅度，一个六年IC绝对值超过0.1的因子！,turnover,none,no_code,,,0,用80%分位数计算的因子，2019年的IC绝对值也无限接近0.12了，这一点是强于其他分位数计算的因子的。,这个分层回测的结果只能说是中规中矩。,研报 / 换手率,,2026-03-30_换手率极大值幅度，一个六年IC绝对值超过0.1的因子！.py,general
+2026-04-06,成交量分桶熵，一个在《因子日历》中多次出现的因子！,volume,yes,minute_unspecified,volume,,22,这个因子在IC上的表现就比较一般了，哪怕在同一篇研报中，它也不能算高。其IC绝对值超过0.06的年份居然只有2019年这一年。,这个分层回测的结果也比较一般。,研报 / 成交量,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    vol = BaseDataLoader.load_data(full_path,
+                                    fields=['volume']).to_dataframe('volume')
+    start = vol.min()
+    step = (vol.max() - start) / 10
+    res = []
+    for i in range(1, 11):
+        end = start + step
+        if i != 10:
+            flag = (vol >= start) & (vol < end)
+        else:
+            flag = (vol >= start) & (vol <= end)
+        res.append(flag.sum())
+        start = end
+    res = pd.concat(res, axis=1).T
+    res = res / vol.count()
+    res = res * np.log(res)
+    res = -res.sum()
+    res.name = pd.to_datetime(file_name.split('.')[0]) + timedelta(hours=15)
+    return res",2026-04-06_成交量分桶熵，一个在《因子日历》中多次出现的因子！.py,zhengzhaolei
+2026-04-08,领先成交额异动，居然是一个多空收益很强的多头因子！,volume,yes,minute_unspecified,close|turnover,sklearn.LinearRegression,38,这个因子只有2019年1年的IC绝对值超过了0.1，超过0.08的也就四年。,首先来看看amt\_lead\_max90这个因子的分层回测结果。,研报 / 成交量 / 趋势 / 异常,"def cal_resi(y, x):
+        data = pd.concat([y, x], axis=1).dropna()
+        if len(data) < 60 or data.iloc[:, 0].sum() == 0:
+            return pd.Series(index=y.index, name=y.name)
+        lr = LinearRegression()
+        lr.fit(data.iloc[:, 1:], data.iloc[:, 0:1])
+        resi = data.iloc[:, 0:1] - lr.predict(data.iloc[:, 1:])
+        return resi",2026-04-08_领先成交额异动，居然是一个多空收益很强的多头因子！.py,general
+2026-04-11,高波期波动率均值，用GMM模型来分析波动率，效果竟然也不错！,volatility,yes,minute_unspecified,close|high|low|open|turnover|volume,sklearn.GaussianMixture,36,从IC上来看，high\_vol\_mean2w并不出彩，绝对值最高的一年也只是勉强超过了0.08。,虽然，这个因子的IC绝对值并不是很高，但是分层回测还是能看的。至少，从2021年上半年开始，蓝线就拉开了与其他线的差距。,研报 / 成交量 / 波动率 / 收益率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'high', 'low', 'turnover', 'volume'])
+    prefer_sigma_5 = []
+    for i in range(5, len(data.data)+1):
+        tmp_data = data.data[i-5:i, 0:4, :].reshape(-1, len(data.codes))
+        tmp_sigma = np.nanstd(tmp_data, axis=0) / np.nanmean(tmp_data, axis=0)
+        prefer_sigma_5.append(tmp_sigma)
+    prefer_sigma_5 = pd.DataFrame(prefer_sigma_5, columns=data.codes)
+    res = []
+    for i in range(len(data.codes)):
+        res.append(self.gmm_fit(prefer_sigma_5.iloc[:, i].values))
+    res = np.array(res)
+    factor_df = pd.DataFrame(index=data.codes, columns=['high_vol_weight', 'low_vol_weight', 'high_vol_mean', 'low_vol_mean', 'high_vol_std',
+                                                        'low_vol_std'], data=res)
+    factor_df['low_vol_mean2w'] = res[:, 3] / res[:, 1]
+    factor_df['high_vol_mean2w'] = res[:, 2] / res[:, 0]
+    factor_df['mean_diff'] = res[:, 2] - res[:, 3]
+    factor_df['mean2w_diff'] = factor_df['mean_diff'] / (res[:, 0] - res[:, 1])
+    factor_df['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return factor_df",2026-04-11_高波期波动率均值，用GMM模型来分析波动率，效果竟然也不错！.py,general
+2026-04-13,行业联合动量因子，大A对于动量的研究可以说是相当深入了！,reversal,yes,1day,close|factor|market_cap|sw_l1_code|volume,joblib,59,这个IC的表现说实话，其实也挺一般的，最高的一年也才勉强超过了0.07。,这个分层回测的结果应该算是比较差了。,研报 / 反转 / 动量 / 趋势,"def cal_factors_by_ind(self, group, idx):
+    codes = group.index.tolist()
+    rtn = self.rtn.iloc[idx-20:idx][codes]
+    weights = self.market_cap.iloc[idx-20:idx][codes]
+    weights = weights / weights.sum(axis=1).values.reshape(-1, 1)
+    self.sector_rtn = (rtn * weights).sum(axis=1)
+    vol = self.rtn.iloc[idx-20:idx][codes]
+    res = []
+    for i in range(len(codes)):
+        res_rtn = self.cal_factors_by_code(rtn.iloc[:, i])
+        res_vol_rtn = self.cal_factors_by_code(rtn.iloc[:, i] * vol.iloc[:, i])
+        res .append(res_rtn + res_vol_rtn)
+    res = pd.DataFrame(res, index=codes, columns=['icm', 'icr', 'vicm', 'vicr'])
+    return res",2026-04-13_行业联合动量因子，大A对于动量的研究可以说是相当深入了！.py,general
+2026-04-15,UMR因子，风险和超额收益相乘之后，反转变动量！,reversal,yes,1day,circulating_market_cap|close|factor|high|low|market_cap|turnover|turnover_ratio|volume,,49,这个IC还是比较稳定的，总共只有6个月的IC为负，其他月份都为正。同时，还有6年的IC超过了0.08，其中，2018年和2021年的甚至接近0.1了。,首先来看看tr\_umr这个因子的分层回测结果。,邪修 / 研报 / 反转 / 动量,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'turnover']).to_dataframes()
+    rtn = data['close'].pct_change().iloc[1:]
+    money = data['turnover'].iloc[:6].sum() + data['turnover'].iloc[-6:].sum()
+    sigma = rtn.std()
+    skew = rtn.skew()
+    res = pd.concat([money, sigma, skew], axis=1)
+    res.columns = ['money', 'sigma', 'skew']
+    res['datetime'] = cur
+    return res",2026-04-15_UMR因子，风险和超额收益相乘之后，反转变动量！.py,general
+2026-04-16,邪修成功！我计算了五种波动率，然后用k-means将其聚类后，得到波谷分钟数因子！,volatility,yes,minute_unspecified,close|high|low|open,sklearn.KMeans,54,这个IC的表现和一些好的因子相比确实不怎么样，但是和量峰、量岭和量谷分钟数这三个因子相比的话，就还算可以的，至少和它们三中最好的那一个是差不多的。,这个分层回测也并不是很好，只能说看起来比量岭、量峰和量谷分钟数这三个因子舒服一点。,邪修 / 研报 / 成交量 / 波动率,"def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'high', 'low'])
+    prefer_sigma_5 = []
+    for i in range(5, len(data.data) + 1):
+        tmp_data = data.data[i-5:i, :, :].reshape(-1, len(data.codes))
+        tmp_sigma = np.nanstd(tmp_data, axis=0) / np.nanmean(tmp_data, axis=0)
+        prefer_sigma_5.append(tmp_sigma)
+    prefer_sigma_5 = pd.DataFrame(prefer_sigma_5, columns=data.codes)
+    prefer_sigma_5.index = data.trade_days[4:]
+    data = data.to_dataframes()
+    sigma = data['close'].pct_change().rolling(5).std()
+    hl_ratio = data['high'] / data['low']
+    co_ratio = data['close'] / data['open']
+    hc_ratio = data['high'] / data['close']
+    ho_ratio = data['high'] / data['open']
+    lc_ratio = data['low'] / data['close']
+    lo_ratio = data['low'] / data['open']
+    sigma_p = np.sqrt((np.square(np.log(hl_ratio))).rolling(5).sum() / (20 * np.log(2)))
+    sigma_gk = np.sqrt((0.5 * np.square(np.log(hl_ratio)) -
+                        (2 * np.log(2) - 1) * np.square(np.log(co_ratio))).rolling(5).mean())
+    sigma_rs = (np.log(hc_ratio) * np.log(ho_ratio) +
+                np.log(lc_ratio) * np.log(lo_ratio)).rolling(5).mean()
+    sigma_rs = np.sqrt(sigma_rs)
+    res = []
+    for i in range(sigma_rs...",2026-04-16_邪修成功！我计算了五种波动率，然后用k-means将其聚类后，得到波谷分钟数因子！.py,general
+2026-04-20,收益率的不对称性，2007年老外的研究和MMD结合之后，IC居然还挺高！,other,yes,minute_unspecified,close,,29,从IC上来看，这个因子的表现还是不错的。,虽然，这个因子在IC上的表现不错，但是，其分层回测的表现就有点不尽如人意了。,收益率,"def __cal_factors__(self, data):
+    mu = data.mean()
+    data = data.dropna()
+    if len(data) < 60:
+        return np.nan
+    new_data = -data + 2 * mu
+    asym = self.compute_mmd(data.values, new_data.values)
+    return asym
+@staticmethod",2026-04-20_收益率的不对称性，2007年老外的研究和MMD结合之后，IC居然还挺高！.py,general
+2026-04-23,邪修！市场缩量我放量，市场放量我缩量，专和市场对着干？,volume,yes,minute_unspecified,volume,,29,在IC上的表现只能说是中规中矩，没有太多的亮点。,在收益分析中，笔者将展现三组分层回测的结果。,邪修 / 成交量 / 相关性,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    vol = []
+    for i in range(idx-20,idx+1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        data = BaseDataLoader.load_data(full_path, fields=['volume']).to_dataframe('volume')
+        vol.append(data)
+    vol = self.z_score(vol)
+    res = vol.iloc[:, :-1].corrwith(vol.iloc[:, -1])
+    res = res.to_frame()
+    res.columns = ['vol_corr']
+    res['datetime'] = cur
+    return res",2026-04-23_邪修！市场缩量我放量，市场放量我缩量，专和市场对着干？.py,general
+2026-04-27,一种超级复杂的衡量不对称性的方法，想法很有意思！,academic,yes,unclear,,,20,说实话，这个IC的表现挺一般的，甚至还不如[收益率的不对称性，2007年老外的研究和MMD结合之后，IC居然还挺高！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=224749...,这个分层回测的表现也并不是很好。,研报 / 复杂 / 收益率 / 偏度 / 尾部,"def __cal_factors__(self, data):
+    data = data.dropna()
+    if data.std() == 0:
+        return 0
+    if len(data) < 10:
+        return np.nan  # 核密度估计至少需要10个样本
+    # 2. 核密度估计（拟合 PDF）
+    kde = gaussian_kde(data, bw_method='scott')
+    # 3. 构建 x 轴网格（覆盖收益率主要分布区间）
+    mu, sigma = data.mean(), data.std()
+    x_min = mu - 3 * sigma
+    x_max = mu + 3 * sigma
+    x_grid = np.linspace(x_min, x_max, 1000)
+    # 4. 计算网格上的 PDF 与 CDF
+    pdf_grid = kde.evaluate(x_grid)  # PDF 值
+    # 梯形法累积积分 → CDF
+    dx = x_grid[1] - x_grid[0]
+    cdf_grid = cumulative_trapezoid(pdf_grid, dx=dx, initial=0)
+    cdf_grid = np.clip(cdf_grid, 0.0, 1.0)  # 数值截断
+    # 5. 将原始收益率点映射到 CDF 曲线上
+    pdf_xi = kde.evaluate(data)  # 每个 xi 处的 PDF 值
+    cdf_xi = np.interp(data, x_grid, cdf_grid)  # 每个 xi 处的 CDF 值
+    # 6. 计算相关系数 ρ[ PDF(xi), CDF(xi) ]
+    r, _ = pearsonr(pdf_xi, cdf_xi)
+    # 7. 最终因子 Asym = -ρ
+    asym = -r
+    return asym",2026-04-27_一种超级复杂的衡量不对称性的方法，想法很有意思！.py,general
+2026-04-29,尾部Beta，原来计算Beta不一定要用最小二乘！,academic,yes,minute_unspecified,close,,21,这个IC的表现算是中规中矩吧，有五年的绝对值超过了0.06，其中还有一年超过了0.08。,看到这个分层回测结果，笔者陷入了沉思。,研报 / 收益率 / Beta / 尾部,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close']).to_dataframes()
+    rtn = data['close'].pct_change()
+    mkt = rtn.mean(axis=1)
+    var_rtn = rtn.quantile(0.05)
+    var_mkt = mkt.quantile(0.05)
+    tao_j = ((rtn < var_rtn) * (mkt < var_mkt).values.reshape(-1, 1)).mean()
+    mkt = (-mkt).sort_values()
+    alpha_m, cnt = 0, 0
+    for i in range(1, len(mkt)):
+        if mkt.iloc[-i] >= - var_mkt:
+            cnt += 1
+            alpha_m += np.log(1 + mkt.iloc[-i]) - np.log(1 - var_mkt)
+    alpha_m = alpha_m / cnt
+    tail_beta = tao_j ** alpha_m * var_rtn / var_mkt
+    tail_beta.name=cur_time
+    return tail_beta",2026-04-29_尾部Beta，原来计算Beta不一定要用最小二乘！.py,general
+2026-05-05,尾部风险，老外的因子在大A是一如既往的拉，还是效果炸裂呢？,academic,yes,minute_unspecified,close,sklearn.LinearRegression,25,IC表现中规中矩，只有一年的绝对值低于0.05，但是也只有一年的绝对值超过了0.08。,这个因子的分层回测结果和之前尾部Beta的因子有点像，都是中间一组表现最好。,Beta / CVaR / 尾部,"def cal_resi(data):
+    data = data.dropna()
+    if len(data) < 2:
+        return np.nan
+    lr = LinearRegression()
+    lr.fit(data.iloc[:, 1:], data.iloc[:, 0:1])
+    return lr.coef_[0][0]",2026-05-05_尾部风险，老外的因子在大A是一如既往的拉，还是效果炸裂呢？.py,general
+2026-05-09,Betting_Against_Beta，一个能解释巴菲特公开投资组合收益来源的因子，在大A会有怎么样的表现？,academic,yes,1day,close|factor,joblib|sklearn.LinearRegression,41,这个因子的IC绝对值不算高，但是胜在稳定。,至于分层回测嘛，那就是普普通通，不算好但也谈不上差。,Beta,"def __cal_factors__(self, data):
+    data = data.dropna()
+    if len(data) < 200:
+        return np.nan
+    x = data.iloc[:, :-1].values
+    y = data.iloc[:, -1:].values
+    lr = LinearRegression()
+    lr.fit(x, y)
+    return np.mean(lr.coef_)",2026-05-09_Betting_Against_Beta，一个能解释巴菲特公开投资组合收益来源的因子，在大A会有怎么样的表现？.py,general
+2026-05-13,有心栽花花不开，无心插柳柳成荫！邪修的副产品，分层回测竟然差一点就“完美”了！,volume,yes,minute_unspecified,volume,sklearn.LinearRegression|sklearn.metrics,39,这个因子前几年的IC表现还行，从2022年开始逐年下降。看起来，有失效的趋势。,首先来看看用均值低频化后的分层回测结果，可以说还行。,邪修 / 成交量 / 可预测性 / R方,"def cal_factors(x, y):
+    flag = ~np.isnan(x) & ~np.isnan(y)
+    x, y = x[flag].reshape(-1, 1), y[flag].reshape(-1, 1)
+    lr = LinearRegression()
+    lr.fit(x, y)
+    pred = lr.predict(x)
+    r2 = r2_score(y, pred)
+    return [lr.coef_[0][0], r2]",2026-05-13_有心栽花花不开，无心插柳柳成荫！邪修的副产品，分层回测竟然差一点就“完美”了！.py,general
+2026-05-19,筹码分布因子，IC不高，但是分层结果相当出色！,volatility,yes,1day,close|factor|turnover_ratio|volume,joblib,57,这个IC表现确实不行，如果用标准差低频化的话，其IC累加能达到-6。,这个分层回测看起来还行。在整个回测区间里，其年化收益率的单调性是完美的，因子值越小的组年化收益率越高。,研报 / 偏度 / 峰度,"def cal_factors(self, code, close, volume, factor, tr):
+    data = pd.concat([close, volume], axis=1)
+    data.columns = ['close', 'volume']
+    data = data.groupby('close', as_index=False, group_keys=False).sum()
+    last_data = self.last_chip.get(code, None)
+    if last_data is None:
+        data.iloc[:, -1] *= tr
+    else:
+        last_data['close'] /= factor
+        data = data.merge(last_data, how='outer', on=['close'])
+        data = data.fillna(0)
+        data['volume'] = data.iloc[:, -1] * (1 - tr) + data.iloc[:, -2] * tr
+        data = data[['close', 'volume']]
+    chip_high = data['close'].iloc[data['volume'].argmax()]
+    chip_low = data['close'].iloc[data['volume'].argmin()]
+    diff = chip_high - chip_low
+    close = close.iloc[-1]",2026-05-19_筹码分布因子，IC不高，但是分层结果相当出色！.py,chenshengrui
+2026-05-20,价格跳跃成交额相关性，热乎的研报，不错的因子！,volume,yes,minute_unspecified,close|high|low,,22,这个因子的IC表现确实算是不错的，六年的绝对值超过了0.08，其中还有三年超过了0.1。,这个因子的分层回测结果也不能说是差。,研报 / 成交量 / 相关性,"def process_single_day(self, idx):
+    if idx < 20:
+        return pd.DataFrame({})
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    amp = []
+    fields = ['close', 'high', 'low']
+    for i in range(idx - 20, idx + 1):
+        file_name = self.files[i]
+        full_path = os.path.join(self.file_pth, file_name)
+        if i == idx:
+            fields += ['turnover']
+        data = BaseDataLoader.load_data(full_path, fields=fields).to_dataframes()
+        tmp_amp = (data['high'] - data['low']) / data['close'].shift(1)
+        amp.append(tmp_amp)
+    flag = self.cal_flag(amp)
+    money = data['turnover'].reindex(columns=flag.columns.tolist())
+    money_shift = (money * np.where(flag.shift(1), 1, np.nan)).iloc[1:237]
+    money = ((money * np.where(flag, 1, np.nan)).shift(1)).iloc[1:237]
+    res = money.corrwith(money_shift)
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-05-20_价格跳跃成交额相关性，热乎的研报，不错的因子！.py,weijianrong
+2026-05-27,基于马尔科夫链的收益率异常时刻成交额相关性，3年IC绝对值超0.12！,volume,yes,minute_unspecified,close|open|turnover|volume,,17,从IC上来看，收益率异常时刻的成交额相关性的表现是更好的。其2022年的IC绝对值超过0.1，20218年和2023年超过了0.12，而2021年更是超过了0.14。,这个因子虽然在IC上的表现略胜一筹，但是其分层回测就不如价格跳跃成交额相关性了。,研报 / 收益率 / 相关性 / 异常,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume', 'turnover']).to_dataframes()
+    rtn = data['close'] / data['open'] - 1
+    rtn['mkt'] = rtn.mean(axis=1)
+    prob = self.cal_prob(rtn, rtn['mkt'])
+    thd = prob['mkt'].quantile(0.05)
+    flag = (prob.iloc[:, :-1] < thd)
+    money = data['turnover'].shift(-4).dropna()
+    money_shift = (money * np.where(flag.shift(1), 1, np.nan))
+    money = ((money * np.where(flag, 1, np.nan)).shift(1))
+    res = money.iloc[:233].corrwith(money_shift.iloc[:233])
+    res.name = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res",2026-05-27_基于马尔科夫链的收益率异常时刻成交额相关性，3年IC绝对值超0.12！.py,general
+2026-05-29,筹码集中度因子，会全方面的超越筹码分布吗？,volatility,yes,unclear,,,33,,,研报 / 偏度,"def cal_factors(self, code, close, volume, factor, tr):
+    data = pd.concat([close, volume], axis=1)
+    data.columns = ['close', 'volume']
+    data = data.groupby('close', as_index=False, group_keys=False).sum()
+    last_data = self.last_chip.get(code, None)
+    if last_data is None:
+        data.iloc[:, -1] *= tr
+    else:
+        last_data['close'] /= factor
+        data = data.merge(last_data, how='outer', on=['close'])
+        data = data.fillna(0)
+        data['volume'] = data.iloc[:, -1] * (1 - tr) + data.iloc[:, -2] * tr
+        data = data[['close', 'volume']]
+    chip_high = data['close'].max()
+    chip_low = data['close'].min()
+    diff = chip_high - chip_low
+    close = close.iloc[-1]
+    weight = data['volume'] / data['volume'].sum()
+    mean = np.average(data['close'], weights=weight)
+    q = data['close'].quantile([0.05, 0.95, 0.15, 0.85, 0.25, 0.75])
+    q_90 = q.iloc[1] - q.iloc[0]
+    q_70 = q.iloc[3] - q.iloc[2]
+    q_50 = q.iloc[5] - q.iloc[4]
+    chip_distri1 = 2 * q_90 / (q.iloc[1] + q.iloc[0])
+    chip_distri2 = q_90 / chip_high
+    chip_distri3 = 2 * q_70 / (q.iloc[3] + q.iloc[2])
+    chip_distri4 = q_70 / chip_high
+    chip_distri5 = 2 * q_50 / (q.iloc[5] + q.iloc[4])
+    chip_distri6 = q_50 / chip_high
+    data.iloc[:, 0] *= factor
+    self.last_chip[code] = data.copy()
+    return ((close - mean) / diff, chip_high / chip_low - 1, (mean - chip_low) / diff,
+            chip_distri1, chip_distri2, chip_distri3, chip_distri4, chip_distri5, chip_distri6)",2026-05-29_筹码集中度因子，会全方面的超越筹码分布吗？.py,general
+2026-05-31,趋势清晰动量因子，大A对动量的研究可以说是“子子孙孙无穷尽也”！,reversal,yes,1day,close|factor|volume,joblib|sklearn.LinearRegression|sklearn.metrics,31,这个因子的IC表现肯定也是不行的，两年为正，五年为负。但是，它比TM2因子要好。,,研报 / 反转 / 动量 / 趋势,"def __cal_tc__(data):
+    data['t'] = list(range(1, len(data) + 1, 1))
+    data = data.dropna()
+    if len(data) < 200:
+        return np.nan
+    lr = LinearRegression()
+    lr.fit(data.iloc[:, 1:], data.iloc[:, 0:1])
+    pred = lr.predict(data.iloc[:, 1:])
+    r2 = r2_score(data.iloc[:, 0:1], pred)
+    return r2",2026-05-31_趋势清晰动量因子，大A对动量的研究可以说是“子子孙孙无穷尽也”！.py,general
+2026-06-01,成交量在收益率上的分布，一个IC和分层俱佳的因子？,volatility,yes,minute_unspecified,close|open|volume,,16,价格显著上行价稳量比因子的IC累加能到-7，而价格显著上行价稳量比稳定因子只能到-6。,这个因子的分层回测结果有那么一点儿不完美，主要是在2020年到2023年这段时间里，蓝线的净值低于黄线和绿线。,研报 / 复杂 / 成交量 / 收益率 / 偏度,"def process_single_day(self, idx):
+    # 加载当日分钟数据
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur_time = pd.to_datetime(date_str) + timedelta(hours=15)
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, fields=['close', 'open', 'volume']).to_dataframes()
+    rtn = data['close'] / data['open'] - 1
+    flag = (rtn > 0) & (rtn > rtn.mean() + rtn.std())
+    sigma = (rtn * np.where(flag, 1.0, np.nan)).std()
+    vol_mu = data['volume'].mean()
+    sig_up_p_v_ratio = sigma * (data['volume'] * np.where(flag, 1.0, np.nan)).mean() / vol_mu
+    sig_up_v_intraday_std = sigma * (data['volume'] * np.where(flag, 1.0, np.nan)).std() / vol_mu
+    res = pd.concat([sig_up_p_v_ratio, sig_up_v_intraday_std], axis=1)
+    res.columns = ['sig_up_p_v_ratio', 'sig_up_v_intraday_std']
+    res['datetime'] = cur_time
+    return res",2026-06-01_成交量在收益率上的分布，一个IC和分层俱佳的因子？.py,general
+2026-06-02,抱着怀疑的态度，我复现了一下工作日动量，没想到分层回测的结果让我震惊！,momentum,yes,1day,close|factor,,11,从IC上来看，这个因子在2018年到2020年的表现一般，从2021年之后有所提升。,本来，笔者对这个因子不抱任何期待，甚至是怀疑的。,研报 / 动量,"def __call__(self):
+    data = BaseDataLoader.load_data('../../data/stock/stock_bar_1day.parquet', fields=['close', 'factor']
+                                         ).to_dataframes()
+    rtn = (data['close'] * data['factor']).pct_change()
+    flag = np.array(rtn.index.weekday.tolist()).reshape(-1, 1)
+    res = {}
+    for i in range(5):
+        tmp = (rtn * np.where(flag == i, 1, np.nan)).rolling(21, min_periods=2).mean()
+        res['mom_{}'.format(i)] = tmp
+    res = dfs_to_df(res)
+    res.to_parquet('./workday_mom.parquet')",2026-06-02_抱着怀疑的态度，我复现了一下工作日动量，没想到分层回测的结果让我震惊！.py,general
+2026-06-08,成交量在价格上的分布，会比其在收益率上的分布因子表现更好吗？,volume,yes,minute_unspecified,close|open|volume,,51,从IC上来看，这个因子的表现是不如其在收益率上的分布的。,,研报 / 成交量 / 收益率 / 日内,"def cal_factor(data):
+    close_idx = None
+    close = data.iloc[-1, 0]
+    rtn = data.iloc[-1, 0] / data.iloc[0, -1] - 1
+    q = data['close'].quantile([i / 10 for i in range(11)])
+    data.sort_values(by='close', inplace=True)
+    vol_group = []
+    end = 1
+    tmp_vol = 0
+    for i in range(len(data)):
+        if data.iloc[i, 0] <= q.iloc[end]:
+            tmp_vol += data.iloc[i, 1]
+        else:
+            vol_group.append(tmp_vol)
+            tmp_vol = data.iloc[i, 1]
+            end += 1
+        if data.iloc[i, 0] == close and close_idx is None:
+            close_idx = end
+    vol_group.append(tmp_vol)
+    if len(vol_group) < 10:
+        vol_group += [0] * (10 - len(vol_group))
+    vol_group = np.array(vol_group) / np.sum(vol_group)
+    v_p_skewness = 3 * (np.mean(vol_group) - np.median(vol_group)) / np.std(vol_group)
+    poc_list = []
+    for i in range(len(vol_group)):
+        if i == 0:
+            poc_list.append(2 * vol_group[i] + vol_group[i + 1])
+        elif i == len(vol_group) - 1:
+            poc_list.append(2 * vol_group[i] + vol_group[i - 1])
+        else:
+            poc_list.append(vol_group[i - 1] + vol_group[i] + vol_group[i + 1])
+    poc_idx = np.argmax(poc_list)
+    if rtn < 0:
+        v_p_reversal = (poc_idx - close_idx + 1) * rtn
+    else:
+        v_p_reversal = (close_idx - poc_idx + 1) * rtn
+    return [v_p_skewness, v_p_reversal]",2026-06-08_成交量在价格上的分布，会比其在收益率上的分布因子表现更好吗？.py,general
+2026-06-10,显著信息特质波动率，花里胡哨的操作带来的提升肉眼不可见，最后还得靠黑科技！,volatility,yes,1day,close|factor|high|low|open|turnover_ratio,joblib|sklearn.LinearRegression,55,IC有所下降，这也是意料之中的。,这个分层回测是用市值加权的。,研报 / 波动率,"def __cal_resi_rtn__(self, data, amp, tr, sigma):
+    data = data.dropna()
+    if len(data) < 10:
+        return [np.nan] * 4
+    x = data.iloc[:, 1:]
+    y = data.iloc[:, 0]
+    lr = LinearRegression()
+    lr.fit(x, y)
+    resi = y - lr.predict(x)
+    resi_sigma = np.sqrt(np.mean(np.square(resi)))
+    resi_sigma_tr = self.cal_resi_by_large_20(resi, tr)
+    resi_sigma_amp = self.cal_resi_by_large_20(resi, amp)
+    resi_sigma_sigma = self.cal_resi_by_large_20(resi, sigma)
+    return [resi_sigma, resi_sigma_tr, resi_sigma_amp, resi_sigma_sigma]
+@staticmethod",2026-06-10_显著信息特质波动率，花里胡哨的操作带来的提升肉眼不可见，最后还得靠黑科技！.py,general
+2026-06-12,一个国债期货择时因子用来选股竟然有这样高的IC？,volume,yes,minute_unspecified,volume,,27,这个IC的表现算还行，有两年的绝对值超过了0.1。,这个分层回测的结果在2022年之前不怎样，但是2022年之后看起来似乎呈现出了完美的单调性。,研报 / 成交量,"def cal_factors(self, data):
+    absolute_deviation = np.abs(data - data.median())
+    mad = np.nanmedian(absolute_deviation)
+    thd = 5 * mad
+    # thd = 3 * data.std()
+    res = [0, 1]
+    for i in range(2, len(data)):
+        for j in range(i-1, -1, -1):
+            if abs(data.iloc[i] - data.iloc[j]) > thd:
+                res.append(i - j)
+                break
+        if len(res) != i + 1:
+            res.append(i)
+    res = np.array(res)
+    mu, sigma, max_val = np.mean(res), np.std(res), np.max(res)
+    extreme = np.mean(res > mu + 2 * sigma)
+    return np.mean(res), np.std(res), max_val, max_val - np.min(res), extreme, np.mean(res[:120]) / np.mean(res[120:])",2026-06-12_一个国债期货择时因子用来选股竟然有这样高的IC？.py,general
+2026-06-16,活动筹码因子，IC表现好于筹码分布！,volatility,yes,unclear,,,22,这个IC如果放在笔者复现过的一系列因子中，它的表现不值得一提。但是，在这篇研报中，看起来似乎是表现最好的了。,这个分层回测的单调性并不是很完美，红线的净值超过了绿线，甚至有些阶段还超过了黄线。,研报 / 偏度,"def cal_factors(self, code, close, volume, factor, tr, high_price, low_price):
+    data = pd.concat([close, volume], axis=1)
+    data.columns = ['close', 'volume']
+    data = data.groupby('close', as_index=False, group_keys=False).sum()
+    last_data = self.last_chip.get(code, None)
+    if last_data is None:
+        data.iloc[:, -1] *= tr
+    else:
+        last_data['close'] /= factor
+        data = data.merge(last_data, how='outer', on=['close'])
+        data = data.fillna(0)
+        data['volume'] = data.iloc[:, -1] * (1 - tr) + data.iloc[:, -2] * tr
+        data = data[['close', 'volume']]
+    tot_chip = data.iloc[:, 1].sum()
+    asr = data[(data['close'] >= low_price) & (data['close'] < high_price)].iloc[:, 1].sum() / tot_chip
+    asr_upper = data[(data['close'] >= close) & (data['close'] < high_price)].iloc[:, 1].sum() / tot_chip
+    asr_lower = data[(data['close'] >= low_price) & (data['close'] < close)].iloc[:, 1].sum() / tot_chip
+    asr_above = data[data['close'] >= high_price].iloc[:, 1].sum() / tot_chip
+    asr_below = data[data['close'] < low_price].iloc[:, 1].sum() / tot_chip
+    data.iloc[:, 0] *= factor
+    self.last_chip[code] = data.copy()
+    return asr, asr_upper, asr_lower, asr_above, asr_below",2026-06-16_活动筹码因子，IC表现好于筹码分布！.py,general
+2026-06-18,黑科技又成功了？和原始因子相比，IC和分层全面提升！,volume,none,no_code,,,0,这个采用了黑科技之后的因子，其在IC上的表现好于成交量分桶熵，略差于非流动性分桶熵。,在分层回测上，无论是和成交量分桶熵相比，还是和非流动性分桶熵相比，这个提升都是挺明显的。,邪修 / 成交量 / 非流动性 / 流动性,,2026-06-18_黑科技又成功了？和原始因子相比，IC和分层全面提升！.py,general

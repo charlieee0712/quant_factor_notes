@@ -1,0 +1,187 @@
+"""邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！
+
+自动生成自 ../sources/general/articles/2026-03-10_邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！.md。
+所有 # 注释内容均直接摘录自原文，未经改写或归纳。
+图片位于 ../sources/general/articles/images/2026-03-10_邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！/
+"""
+
+# ============================================================
+# 来源
+# ============================================================
+# 来源标识: general
+# 公众号  : 量化拯救散户
+# 标题    : 邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！
+# 日期    : 2026-03-10
+# 原文 URL: https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247495405&idx=1&sn=40d5cdc601d3f0fccad971aad6f66102
+# 本地原文: ../sources/general/articles/2026-03-10_邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！.md
+# 本地图片: ../sources/general/articles/images/2026-03-10_邪修！优化的收益率极大值幅度，IC大幅提升，多空收益也更好了！/  (共 15 张)
+# 段落识别: PARTIAL  (FULL=三段齐备 / PARTIAL=部分 / SKELETON_ONLY=仅回测段 / NONE=无段标题)
+# 生成时间: 2026-06-22T00:56:51
+
+# ============================================================
+# 导读（原文头部，至首个内容段标题或首个代码块前）
+# ============================================================
+# **收益率极大值幅度**
+#
+# 上周的时候，笔者写了篇文章介绍收益率极大值幅度这个因子，还说它是一个差点错过的超级多头因子（[收益率极大值幅度：一个我差点错过的超级多头因子！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247495105&idx=1&sn=cbd66f5bad81250e59992d6ed9cd3349&scene=21#wechat_redirect)）。
+#
+# 其实，在很久很久之前，笔者就尝试过复现这个因子（[收益率极值，IC虽然不高，但确是一个难得一见的多头因子！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247488319&idx=1&sn=f8e25eb35f2e8669100348f757447293&scene=21#wechat_redirect)），但是当时没有理解到这个因子的精髓，所以复现失败了。
+#
+# 经过前两次的研究，笔者发现这个因子的分层回测表现是很不错的，可以说是一个多头因子。但是，它的IC表现并不是太好。所以，笔者想邪修一把，看看能不能提高一下它的IC，同时不影响分层回测的表现。
+#
+# **计算步骤和代码**
+#
+# 这里笔者修改的是VaR的计算方式。
+#
+# 在原始因子中，VaR是用1分钟收益率计算的，取的是95%分位数。
+#
+# 这里，笔者想到了这篇文章[基于日常收益的注意力溢出，一个IC和分层回测俱佳的因子！](https://mp.weixin.qq.com/s?__biz=MzkwNjYzMTEyMg==&mid=2247490377&idx=1&sn=9278ded584d008824cb74e206f2a7cfd&scene=21#wechat_redirect)中的操作，用行业和市值对标的进行分组，然后用组内所有标的1分钟收益率的均值来计算VaR。
+#
+# **1**
+
+# ============================================================
+# 作者原文 — 计算步骤
+# ============================================================
+# 是用分组后的收益率均值来计算95%分位数的收益率，其他的计算方式不变。
+#
+
+# ============================================================
+# 作者原文 — 因子逻辑
+# ============================================================
+# (原文中无此段落)
+
+# ============================================================
+# 作者原文 — 回测表现说明
+# ============================================================
+# ## 因子评价
+# 这里就简单的贴一下相关性结果，不做过多的说明了。
+#
+# 从结果上来说，无论是收益率极大值幅度还是收益率极小值出现的概率，其IC上的表现都有所提升。
+#
+# 综合表现最好的是ex\_rtn\_max\_val\_5min这个因子。
+#
+# ## IC分析
+# 从IC上来看，优化后的因子IC绝对值有4年超过了0.08，其中还有一年超过了0.12，而在原始因子中IC绝对值只有三年超过0.06。
+#
+# ## 收益分析
+# 分层回测上，多头收益和原始因子差不多，但是空头收益更低，因此其多空收益更高。
+#
+# 不过，和原始因子一样，分层回测的单调性不是很完美。在原始因子中，收益最小的是红线，而优化后的因子红线的收益率超过了绿线。
+#
+# 笔者自己对这一次的优化还是比较满意的，不知道各位大佬是否也满意呢？如果这个优化让您有那么一点儿满意，能否点赞关注推荐分享支持一下呢？
+#
+
+# ============================================================
+# 本地图片清单（共 15 张）
+# ============================================================
+# 001.png  <-  代码
+# 002.png  <-  因子评价
+# 003.png  <-  IC分析
+# 004.png  <-  IC分析
+# 005.png  <-  IC分析
+# 006.png  <-  IC分析
+# 007.png  <-  IC分析
+# 008.png  <-  IC分析
+# 009.png  <-  回归分析
+# 010.png  <-  回归分析
+# 011.png  <-  换手率分析
+# 012.png  <-  换手率分析
+# 013.png  <-  收益分析
+# 014.png  <-  收益分析
+# 015.png  <-  收益分析
+
+# ============================================================
+# 作者代码（按原文出现顺序，共 4 个代码块）
+# ============================================================
+
+# --- 代码块 1 ---
+def __call__(self):
+    self.ind_data = BaseDataLoader.load_data('../../data/sw_industry.parquet', fields=['sw_l1_code']
+                                             ).to_dataframe('sw_l1_code')
+    self.start = self.ind_data.index.tolist()[0]
+    self.codes = self.ind_data.columns.tolist()
+    self.market_cap = BaseDataLoader.load_data('../../data/capital.parquet', fields=['market_cap'],
+                                               codes=self.codes, start=self.start).to_dataframe('market_cap')
+    res = self.run()
+    res = pd.concat(res)
+    res.index.name = 'code'
+    res.reset_index(inplace=True)
+    res.to_parquet('./new_ex_rtn1.parquet')
+
+# (作者注) 在开始因子计算之前，得先读取行业（第2-3行）和市值数据（第6-7行）。中间的4-5行，是为了对齐行业数据和市值数据的起始时间和标的范围的。
+
+# --- 代码块 2 ---
+def process_single_day(self, idx):
+    file_name = self.files[idx]
+    date_str = file_name.split('.')[0]
+    cur = pd.to_datetime(date_str) + timedelta(hours=15)
+    if idx < 1458:
+        return pd.DataFrame()
+    self.res = None
+    self.rtn_1 = None
+    file_name = self.files[idx]
+    full_path = os.path.join(self.file_pth, file_name)
+    data = BaseDataLoader.load_data(full_path, codes=self.codes, fields=['close']).to_dataframe('close')
+    rtn = data.pct_change(5)
+    self.rtn_1 = data.pct_change(1)
+    self.cal_sector_exrtn(idx)
+    rtn = rtn.reindex(columns=self.res.columns)
+    self.rtn_1 = self.rtn_1.reindex(columns=self.res.columns)
+    ex_rtn_max_val_5min = (np.where(rtn > self.res.iloc[-1], 1.0, np.nan) * rtn).mean() / self.res.iloc[-1]
+    ex_rtn_min_freq_5min = (rtn < self.res.iloc[0]).sum()
+    ex_rtn_max_val_1min = (np.where(self.rtn_1 > self.res.iloc[-1], 1.0, np.nan) * self.rtn_1).mean() / self.res.iloc[-1]
+    ex_rtn_min_freq_1min = (self.rtn_1 < self.res.iloc[0]).sum()
+    res = pd.concat([ex_rtn_max_val_5min, ex_rtn_min_freq_5min, ex_rtn_max_val_1min, ex_rtn_min_freq_1min],
+                    axis=1)
+    res.columns = ['ex_rtn_max_val_5min', 'ex_rtn_min_freq_5min', 'ex_rtn_max_val_1min', 'ex_rtn_min_freq_1min']
+    res['datetime'] = pd.to_datetime(date_str) + timedelta(hours=15)
+    return res
+
+# (作者注) 前11行都是读取数据的一些操作，但是这里有两点需要注意。
+#
+# (作者注) 第5-6行，分钟级别的数据从2004年开始，行业数据从2010年1月4日开始，两者相差了1458个交易日。
+#
+# (作者注) 第7-8行，对输出结果和1分钟收益率的属性置为None，后面有用。
+#
+# (作者注) 第12行，计算5分钟收益率。
+#
+# (作者注) 第13行，计算1分钟收益率。
+#
+# (作者注) 第14行，调用cal\_sector\_exrtn方法计算分组后的收益率95%分位数和5%分位数。
+#
+# (作者注) 第16-17行，对齐数据的列。
+#
+# (作者注) 第18-21行，计算因子，这里笔者不仅用了5分钟收益率来计算因子，还用了1分钟收益率。
+
+# --- 代码块 3 ---
+def cal_sector_exrtn(self, idx):
+    ind_data = self.ind_data.iloc[idx-1458]
+    market_cap = self.market_cap.iloc[idx-1458]
+    df = pd.concat([ind_data, market_cap], axis=1)
+    df.columns = ['ind', 'cap']
+    df.groupby('ind', as_index=False, group_keys=False).apply(self.__cal_factors__)
+
+# (作者注) 该方法将行业和市值数据拼接在一起，然后调用\_\_cal\_factors\_\_方法来计算分组后的收益率均值。
+
+# --- 代码块 4 ---
+def __cal_factors__(self, group):
+    group.sort_values(by='cap', inplace=True)
+    start = 0
+    for q in [0.3, 0.7, 1]:
+        end = int(len(group) * q)
+        tmp_group = group.iloc[start:end]
+        codes = tmp_group.index.tolist()
+        tmp_data = self.rtn_1[codes]
+        tmp_data[:] = tmp_data.mean(axis=1).values[:, np.newaxis]
+        if self.res is None:
+            self.res = tmp_data.quantile([0.05, 0.95])
+        else:
+            self.res = self.res.join(tmp_data.quantile([0.05, 0.95]))
+        start = end
+
+# (作者注) 按照行业和市值（大市值、中市值和小市值）进行分组。
+#
+# (作者注) 这里需要注意的是，第9行，将分组收益率的均值赋值给该组中的每一个标的。
+#
+# (作者注) 第10-13行，计算分组后收益率的5%分位数和95%分位数，并保存在res属性中。
+

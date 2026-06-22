@@ -1,0 +1,29 @@
+# ── 大文件 / 可再生产物（不进版本库）──────────────────────────
+# 本地化图片（~431MB，可由 download_images.py 重新下载）
+sources/*/articles/images/
+# SingleFile 原始 HTML 抓取兜底（体积大）
+sources/*/html/
+# 图片本地化前的 .md 备份（回滚锚点；git 历史本身已可回滚）
+sources/*/articles_backup/
+# factor_lib 打包快照（可由 factor_lib/ 重新打包）
+*.zip
+
+# ── 运维日志 / 失败记录（自动生成）─────────────────────────────
+*.log
+errors.log
+sources/*/failed.txt
+sources/*/image_failed.txt
+sources/*/html_parse_failed.txt
+
+# ── Python 缓存 ───────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ── 本地工具配置 ──────────────────────────────────────────────
+.claude/
+
+# ── 大体积参考资料 / 本地敏感文件（不入库）────────────────────
+*.pdf
+*.xlsx
+AccountSX_CLC.txt
+Alpha基础数据.txt
