@@ -7,7 +7,7 @@
 - **查重**：5 位首席合集 URL 与 general 已爬 109 篇按 `mid+idx` 全局查重 → 跨合集 0 重复、与 general 0 重复，70 篇全是新文（同公众号不同作者系列）。
 - **爬取**：在线 `fetch.py --source <name>` 分来源抓取 5 首席合集共 70 篇：
   - 曹春晓 10 / 覃川桃 8 / 魏建榕 14 / 陈升锐 16 / 郑兆磊 22，全成功 0 失败。
-  - 过程换了 3 个出口 IP（验证码按 IP 累计请求量触发，详见运维教训）。
+  - 过程换了 3 个出口 IP（验证码按 IP 累计请求量触-发，详见运维教训）。
 - **重构**：单来源 → 多来源结构。`articles/`→`sources/general/articles/`、`html_dump/`→`sources/general/html/` 等；`factor_lib/` 留根、跨来源统一不分目录；脚本全部加 `--source`；CSV 加 `source` 列、每个 `.py` 头加 `# 来源标识`。重构前整库备份于 `C:\Users\cnc\quant_factor_notes_backup_20260622\`。
 - **入库**（一次性）：download_images（5 源共 1683 张图，0 失败）→ build_factor_lib（逐源，70 个 .py 并入统一 factor_lib/）→ build_index（179 篇/6 来源）→ classify（CSV 179 行）。factor_lib.zip 重打包到 179。
 - **结果**：179 篇 / 6 来源；factor_lib / factor_index.md / factor_classification.csv 三者均 179、对齐。
