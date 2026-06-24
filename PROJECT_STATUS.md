@@ -1,7 +1,7 @@
 # PROJECT_STATUS — quant_factor_notes
 
-> 项目现状速览。进度时间线见 [WORKLOG.md](WORKLOG.md)，用法/目录/工作流见 [README.md](README.md)。
-> 最后更新：2026-06-22
+> 项目现状速览。进度时间线见 [WORKLOG.md](WORKLOG.md)，用法/目录/工作流见 [README.md](README.md)，另类数据源见 [DATA_SOURCES.md](DATA_SOURCES.md)。
+> 最后更新：2026-06-24
 
 ## 定位
 多来源**因子笔记库**：抓取微信公众号的量价因子文章 → 结构化成 `factor_lib/*.py`（严格摘录原文：来源元数据 + 段落摘录 + 图片清单 + 作者代码，**不加 AI 推断**）。本地只负责"产因子笔记"，**不做回测**。
@@ -37,6 +37,14 @@
 - **本地 quant_factor_notes**：爬虫 + 产出因子笔记（`factor_lib/*.py`，摘录原文与作者代码）。
 - **47 的 `factor_library`**（`/mnt/sda2/lichenchen/factor_library/`）：通用回测库，做因子的工程实现 + 回测 + 交付。
 - 流向：本地因子笔记 → 47 落地实现 / 回测。两者分开维护、各有自己的 PROJECT_STATUS。
+
+## 另类数据源（概念/活跃度/情绪类因子用，数据在 47）
+2026-06-24 实地摸底新增 3 源，全在 47 `/mnt/sda2/HuaTZ/AlterDatabase/`（公司另类数据湖，~19 来源）：
+- **东财 alterDC**（东方财富 Choice，活跃度/人气/情绪，10 个 pickle/8.8 GB，静态快照到 2026-03-25）
+- **同花顺 concept_data**（iFinD 概念指数清洗数据：成分/日&分钟行情/概念热度，64 GB，2012→2026）
+- **同花顺 AlterDataIfind**（MySQL 原始库 `192.168.2.47:3306`，32 表：个股/概念人气、事件驱动新闻、美联储）
+
+路径/结构/粒度/覆盖/用途/访问方式见 **[DATA_SOURCES.md](DATA_SOURCES.md)**；写概念类/活跃度类因子前先查那里。（同花顺「特色」+「基础高频」数据待领导补。）
 
 ## 运维教训
 - WeChat 文章端验证码 `wappoc_appmsgcaptcha` 按**出口 IP 累计请求量**触发（约 10–23 篇/IP，与 `--sleep` 关系不大）；撞墙后换梯子节点、`fetch.py` 幂等续抓（dedup 自动跳过已抓）。本次抓 70 篇换了 3 个 IP。
