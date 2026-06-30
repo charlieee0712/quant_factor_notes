@@ -1,6 +1,6 @@
 # PROJECT_STATUS — quant_factor_notes
 
-> 项目现状速览。进度时间线见 [WORKLOG.md](WORKLOG.md)，用法/目录/工作流见 [README.md](README.md)，另类数据源见 [DATA_SOURCES.md](DATA_SOURCES.md)。
+> 项目现状速览。进度时间线见 [WORKLOG.md](WORKLOG.md)，用法/目录/工作流见 [README.md](README.md)，另类数据源见 [DATA_SOURCES.md](DATA_SOURCES.md)，参考书阅读笔记见 [references/README.md](references/README.md)。
 > 最后更新：2026-06-30
 
 ## 定位
@@ -26,6 +26,7 @@
 - `factor_lib/` — **跨来源统一**，不分来源子目录、统一编号；每个 `.py` 头含 `# 来源标识`。
 - `factor_index.md` / `factor_classification.csv` — 跨来源汇总（CSV 含 `source` 列）。
 - `scripts/` — 共享脚本，全部支持 `--source`（默认 general）。
+- `references/` — 外部参考书阅读笔记（3 本英文书，`pdftotext` 提取；方法论/因子百科参考，**不计入**上面的因子库统计）。入口 [references/README.md](references/README.md)。
 
 ## 数据规模
 - factor_lib：**179** 个 `.py`
